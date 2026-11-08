@@ -964,6 +964,26 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun guideBaseChannels(): List<Channel> =
         shownChannels().sortedWith(compareBy<Channel>({ it.name.lowercase().removePrefix("the ") }, { it.name }))
 
+    private var countryNamesCache: Set<String>? = null
+    private var countryNamesFor: List<Channel>? = null
+
+    /** Every country name we know of (lower case), to keep them out of the category tabs. */
+    private fun countryNames(): Set<String> {
+        countryNamesCache?.let { if (countryNamesFor === allChannels) return it }
+        val names = HashSet<String>()
+        for (code in Locale.getISOCountries()) {
+            names.add(Locale("", code).getDisplayCountry(Locale.ENGLISH).lowercase())
+        }
+        for (ch in allChannels) for (c in ch.countries) names.add(c.lowercase())
+        names.add("international")
+        names.add("uk")
+        names.add("usa")
+        names.remove(M3uParser.OTHER.lowercase())
+        countryNamesCache = names
+        countryNamesFor = allChannels
+        return names
+    }
+
     private fun searchIn(from: List<Channel>, query: String): List<Channel> {
         val words = query.lowercase().split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) return emptyList()
@@ -997,8 +1017,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         if (listed.isNotEmpty() && listed.size < base.size) {
             tabs.add(GuideTab(TabKind.LISTED, getString(R.string.guide_tab_listed), listed))
         }
+        // Categories only: some playlists label channels by country, so leave those out.
+        val countries = countryNames()
         val byCategory = LinkedHashMap<String, MutableList<Channel>>()
-        for (ch in base) for (g in ch.groups) byCategory.getOrPut(g) { ArrayList() }.add(ch)
+        for (ch in base) {
+            val cats = ch.groups.filter { it.lowercase() !in countries }.ifEmpty { listOf(GENERAL) }
+            for (g in cats) byCategory.getOrPut(g) { ArrayList() }.add(ch)
+        }
         byCategory.entries
             .sortedWith(compareBy<Map.Entry<String, MutableList<Channel>>>({ it.key == M3uParser.OTHER }, { -it.value.size }))
             .forEach { tabs.add(GuideTab(TabKind.CATEGORY, it.key, it.value)) }
@@ -1755,6 +1780,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     companion object {
         /** Rows jumped by CH+/CH- while the channel list is open. */
         private const val PAGE_SIZE = 8
+        private const val GENERAL = "General"
 
         private const val STALL_TIMEOUT_MS = 10_000L
         private const val SEEK_STEP_MS = 15_000L
