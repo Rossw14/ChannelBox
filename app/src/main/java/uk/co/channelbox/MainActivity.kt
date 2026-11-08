@@ -1,14 +1,19 @@
 package uk.co.channelbox
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -39,6 +44,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var groupList: RecyclerView
     private lateinit var channelList: RecyclerView
     private lateinit var listTitle: TextView
+    private lateinit var searchBox: EditText
     private lateinit var emptyText: TextView
     private lateinit var statusText: TextView
     private lateinit var scheduleColumn: View
@@ -67,6 +73,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var allChannels: List<Channel> = emptyList()
     private var favourites: Set<String> = emptySet()
     private var hideOffline = true
+    private var allCountries = false
+    private var selectedCountries: Set<String> = emptySet()
     private var guide = GuideData.EMPTY
     private var guideState = GuideState.LOADING
     private var healthText = ""
@@ -76,6 +84,9 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var currentGroupIndex = 0
     private var visibleChannels: List<Channel> = emptyList()
     private var guideMode = false
+    /** null = the top level (countries); otherwise the country being browsed. */
+    private var browseCountry: String? = null
+    private var searchQuery = ""
 
     // What's playing
     private var playingList: List<Channel> = emptyList()
@@ -96,6 +107,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     private val hideBanner = Runnable { banner.visibility = View.GONE }
     private val commitDigits = Runnable { jumpToNumber() }
+    private val searchRunnable = Runnable { runSearch() }
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -111,6 +123,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         groupList = findViewById(R.id.group_list)
         channelList = findViewById(R.id.channel_list)
         listTitle = findViewById(R.id.list_title)
+        searchBox = findViewById(R.id.search_box)
         emptyText = findViewById(R.id.empty_text)
         statusText = findViewById(R.id.status_text)
         scheduleColumn = findViewById(R.id.schedule_column)
@@ -139,6 +152,22 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         channelList.adapter = channelAdapter
         channelList.itemAnimator = null
         groupList.itemAnimator = null
+
+        searchBox.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                searchQuery = s?.toString().orEmpty()
+                handler.removeCallbacks(searchRunnable)
+                handler.postDelayed(searchRunnable, 300L)
+            }
+        })
+        searchBox.setOnEditorActionListener { _, _, _ ->
+            hideKeyboard()
+            runSearch()
+            if (visibleChannels.isNotEmpty()) focusChannel(0)
+            true
+        }
 
         findViewById<View>(R.id.guide_button).setOnClickListener { setGuideMode(!guideMode) }
         findViewById<View>(R.id.settings_button).setOnClickListener {
@@ -191,6 +220,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         loading = true
         lastLoadTime = SystemClock.elapsedRealtime()
         hideOffline = prefs.hideOffline
+        allCountries = prefs.allCountries
+        selectedCountries = prefs.countries
         if (force) health.forgetFailures()
         loadingText.setText(R.string.loading_channels)
         loadingView.visibility = View.VISIBLE
@@ -222,6 +253,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         loadingView.visibility = View.GONE
         allChannels = result.channels
         favourites = prefs.favourites
+        val browsing = browseCountry
+        if (browsing != null && !allCountries && browsing !in selectedCountries) browseCountry = null
         rebuildGroups(keepSelection = currentChannel != null)
 
         if (result.errors.isNotEmpty()) {
@@ -233,13 +266,16 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             showOverlay(guide = false)
         } else if (currentChannel == null) {
             val last = prefs.lastChannel
-            val allIndex = groups.indexOfFirst { it.kind == Group.Kind.ALL }
-            val allList = groups.getOrNull(allIndex)?.channels.orEmpty()
-            val lastIndex = allList.indexOfFirst { it.id == last || (last != null && it.hasUrl(setOf(last))) }
-            if (lastIndex >= 0) {
-                // Pick up where you left off, like a normal TV.
-                selectGroup(allIndex)
-                playChannel(allList, lastIndex)
+            val matches = { c: Channel -> c.id == last || (last != null && c.hasUrl(setOf(last))) }
+            // Pick up where you left off, like a normal TV, zapping within its country.
+            val groupIndex = groups.indexOfFirst { g ->
+                (g.kind == Group.Kind.COUNTRY || g.kind == Group.Kind.ALL || g.kind == Group.Kind.MY_PLAYLIST) &&
+                    g.channels.any(matches)
+            }
+            if (last != null && groupIndex >= 0) {
+                selectGroup(groupIndex)
+                val list = groups[groupIndex].channels
+                playChannel(list, list.indexOfFirst(matches))
                 hideOverlay()
             } else {
                 showOverlay(guide = false)
@@ -269,7 +305,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     private fun startHealthCheck() {
         val generation = ++checkGeneration
-        val channels = allChannels
+        val channels = countryChannels()
         healthText = getString(R.string.checking_channels_start)
         updateStatusText()
         checker.execute {
@@ -292,8 +328,9 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     }
 
     private fun onHealthChecked() {
-        val working = allChannels.count { health.channelStatus(it) != false }
-        healthText = getString(R.string.channels_working, working, allChannels.size)
+        val inScope = countryChannels()
+        val working = inScope.count { health.channelStatus(it) != false }
+        healthText = getString(R.string.channels_working, working, inScope.size)
         updateStatusText()
         refreshLists()
     }
@@ -313,43 +350,137 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun isFavourite(channel: Channel): Boolean =
         channel.id in favourites || channel.hasUrl(favourites)
 
-    /** Channels to list: working (or not yet checked) ones, unless the setting says show all. */
+    /** Channels in the countries you've picked, plus anything only in your own playlist. */
+    private fun countryChannels(): List<Channel> =
+        if (allCountries) allChannels
+        else allChannels.filter { ch -> ch.isCustom || ch.countries.any { it in selectedCountries } }
+
+    /** Those channels, minus ones that aren't working (unless the setting says show all). */
     private fun shownChannels(): List<Channel> {
-        if (!hideOffline) return allChannels
+        val inScope = countryChannels()
+        if (!hideOffline) return inScope
         val playingId = currentChannel?.id
-        return allChannels.filter { health.channelStatus(it) != false || it.id == playingId }
+        return inScope.filter { health.channelStatus(it) != false || it.id == playingId }
     }
 
+    private fun countryOrder(name: String): Int = when (name) {
+        Prefs.HOME_COUNTRY -> 0
+        "International" -> 2
+        M3uParser.OTHER -> 3
+        else -> 1
+    }
+
+    /**
+     * The left-hand list has two levels:
+     *  - top: Favourites, Recently watched, Search, your playlist, then each country
+     *  - inside a country: Back, All channels in that country, then its categories
+     */
     private fun rebuildGroups(keepSelection: Boolean) {
-        val previous = groups.getOrNull(currentGroupIndex)
+        val previousKey = groups.getOrNull(currentGroupIndex)?.key
         val shown = shownChannels()
-
         val built = ArrayList<Group>()
-        val favChannels = shown.filter { isFavourite(it) }
-        if (favChannels.isNotEmpty()) {
-            built.add(Group("favourites", favChannels, Group.Kind.FAVOURITES))
-        }
-        built.add(Group("all", shown, Group.Kind.ALL))
 
-        val byCategory = LinkedHashMap<String, MutableList<Channel>>()
-        for (channel in shown) {
-            for (g in channel.groups) byCategory.getOrPut(g) { ArrayList() }.add(channel)
+        val country = browseCountry
+        if (country == null) {
+            val favs = shown.filter { isFavourite(it) }
+            if (favs.isNotEmpty()) {
+                built.add(Group("favourites", getString(R.string.favourites), favs, Group.Kind.FAVOURITES))
+            }
+            val byId = shown.associateBy { it.id }
+            val recent = prefs.recent.mapNotNull { byId[it] }
+            if (recent.isNotEmpty()) {
+                built.add(Group("recent", getString(R.string.recent), recent, Group.Kind.RECENT))
+            }
+            built.add(Group("search", getString(R.string.search), searchResults(shown), Group.Kind.SEARCH))
+            val mine = shown.filter { it.isCustom }
+            if (mine.isNotEmpty()) {
+                built.add(Group("mine", getString(R.string.my_playlist), mine, Group.Kind.MY_PLAYLIST))
+            }
+            val byCountry = LinkedHashMap<String, MutableList<Channel>>()
+            for (ch in shown) {
+                for (c in ch.countries) {
+                    if (allCountries || c in selectedCountries) byCountry.getOrPut(c) { ArrayList() }.add(ch)
+                }
+            }
+            byCountry.keys
+                .sortedWith(compareBy<String>({ countryOrder(it) }, { it.lowercase() }))
+                .forEach { built.add(Group("country:$it", it, byCountry.getValue(it), Group.Kind.COUNTRY)) }
+            built.add(Group("all", getString(R.string.all_channels), shown, Group.Kind.ALL))
+        } else {
+            val inCountry = shown.filter { country in it.countries }
+            built.add(Group("back", getString(R.string.back_to_countries), inCountry, Group.Kind.BACK))
+            built.add(Group("country-all:$country", getString(R.string.all_in_country, country), inCountry, Group.Kind.ALL))
+            val byCategory = LinkedHashMap<String, MutableList<Channel>>()
+            for (ch in inCountry) {
+                for (g in ch.groups) byCategory.getOrPut(g) { ArrayList() }.add(ch)
+            }
+            byCategory.keys
+                .sortedWith(compareBy<String>({ it == M3uParser.OTHER }, { it.lowercase() }))
+                .forEach { built.add(Group("cat:$it", it, byCategory.getValue(it), Group.Kind.CATEGORY)) }
         }
-        byCategory.keys
-            .sortedWith(compareBy<String>({ it == M3uParser.OTHER }, { it.lowercase() }))
-            .forEach { name -> built.add(Group(name, byCategory.getValue(name), Group.Kind.CATEGORY)) }
 
         groups = built
         groupAdapter.submit(groups)
 
-        var index = -1
-        if (keepSelection && previous != null) {
-            index = groups.indexOfFirst { it.kind == previous.kind && it.name == previous.name }
-        }
-        if (index < 0) {
-            index = groups.indexOfFirst { it.kind == Group.Kind.ALL }.coerceAtLeast(0)
-        }
+        var index = if (keepSelection && previousKey != null) groups.indexOfFirst { it.key == previousKey } else -1
+        if (index < 0) index = defaultGroupIndex()
         selectGroup(index)
+    }
+
+    /** Inside a country: its "All" row. At the top: the first country (the UK). */
+    private fun defaultGroupIndex(): Int {
+        if (browseCountry != null) {
+            return groups.indexOfFirst { it.kind == Group.Kind.ALL }.coerceAtLeast(0)
+        }
+        val firstCountry = groups.indexOfFirst { it.kind == Group.Kind.COUNTRY }
+        return if (firstCountry >= 0) firstCountry else 0
+    }
+
+    private fun openCountry(name: String) {
+        browseCountry = name
+        rebuildGroups(keepSelection = false)
+        focusGroup(currentGroupIndex)
+    }
+
+    private fun closeCountry() {
+        val name = browseCountry ?: return
+        browseCountry = null
+        rebuildGroups(keepSelection = false)
+        val index = groups.indexOfFirst { it.kind == Group.Kind.COUNTRY && it.label == name }
+        if (index >= 0) selectGroup(index)
+        focusGroup(currentGroupIndex)
+    }
+
+    // ---------------------------------------------------------------- search
+
+    private fun searchResults(from: List<Channel>): List<Channel> {
+        val words = searchQuery.lowercase().split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        return from.asSequence()
+            .filter { ch -> words.all { ch.searchText.contains(it) } }
+            .sortedBy { if (it.name.lowercase().startsWith(words[0])) 0 else 1 }
+            .take(300)
+            .toList()
+    }
+
+    private fun runSearch() {
+        val index = groups.indexOfFirst { it.kind == Group.Kind.SEARCH }
+        if (index < 0) return
+        val updated = groups.toMutableList()
+        updated[index] = groups[index].copy(channels = searchResults(shownChannels()))
+        groups = updated
+        groupAdapter.submit(groups)
+        if (currentGroupIndex == index) selectGroup(index)
+    }
+
+    private fun showKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(searchBox.windowToken, 0)
     }
 
     /** Rebuild the lists while keeping the highlighted row where it was. */
@@ -386,12 +517,15 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         visibleChannels = group.channels
         channelAdapter.submit(visibleChannels)
-        val title = when (group.kind) {
-            Group.Kind.FAVOURITES -> getString(R.string.favourites)
-            Group.Kind.ALL -> getString(R.string.all_channels)
-            Group.Kind.CATEGORY -> group.name
-        }
+        val title = if (group.kind == Group.Kind.BACK) browseCountry.orEmpty() else group.label
         listTitle.text = getString(R.string.list_title, title, visibleChannels.size)
+        searchBox.visibility = if (group.kind == Group.Kind.SEARCH) View.VISIBLE else View.GONE
+        emptyText.text = when {
+            group.kind == Group.Kind.SEARCH && searchQuery.isBlank() -> getString(R.string.search_prompt)
+            group.kind == Group.Kind.SEARCH -> getString(R.string.search_none, searchQuery)
+            allChannels.isEmpty() -> getString(R.string.no_channels)
+            else -> getString(R.string.nothing_here)
+        }
         if (visibleChannels.isEmpty()) {
             emptyText.visibility = View.VISIBLE
         } else {
@@ -407,6 +541,9 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             return getString(R.string.now_short, it.title)
         }
         val parts = ArrayList<String>()
+        val inCountryList = browseCountry != null ||
+            groups.getOrNull(currentGroupIndex)?.kind == Group.Kind.COUNTRY
+        if (!inCountryList) channel.countries.firstOrNull()?.let { parts.add(it) }
         parts.add(channel.groups.joinToString(", "))
         if (channel.streams.size > 1) parts.add(getString(R.string.stream_count, channel.streams.size))
         return parts.joinToString("  ·  ")
@@ -453,6 +590,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         playingIndex = i
         currentChannel = channel
         prefs.lastChannel = channel.id
+        val recent = prefs.recent.toMutableList()
+        recent.remove(channel.id)
+        recent.add(0, channel.id)
+        prefs.recent = recent.take(30)
 
         streamQueue = health.ordered(channel)
         streamIndex = 0
@@ -715,8 +856,20 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     }
 
     override fun onGroupClick(position: Int) {
-        if (position != currentGroupIndex) selectGroup(position)
-        focusChannel(0)
+        val group = groups.getOrNull(position) ?: return
+        when (group.kind) {
+            Group.Kind.COUNTRY -> openCountry(group.label)
+            Group.Kind.BACK -> closeCountry()
+            Group.Kind.SEARCH -> {
+                if (position != currentGroupIndex) selectGroup(position)
+                searchBox.requestFocus()
+                showKeyboard()
+            }
+            else -> {
+                if (position != currentGroupIndex) selectGroup(position)
+                focusChannel(0)
+            }
+        }
     }
 
     private fun toggleFavourite(channel: Channel) {
@@ -742,25 +895,79 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
 
+        if (currentFocus is EditText) {
+            // Typing in the search box: only handle leaving it with the arrows.
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN && visibleChannels.isNotEmpty()) {
+                hideKeyboard()
+                focusChannel(0)
+                return true
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT && searchBox.selectionStart == 0) {
+                hideKeyboard()
+                focusGroup(currentGroupIndex)
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (code in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
             typeDigit(code - KeyEvent.KEYCODE_0)
             return true
         }
-        when (code) {
-            KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
-            KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
-            KeyEvent.KEYCODE_GUIDE -> { pressGuide(); return true }
+        if (code == KeyEvent.KEYCODE_GUIDE) {
+            pressGuide()
+            return true
         }
 
         val overlayVisible = overlay.visibility == View.VISIBLE
+        val focus = if (overlayVisible) currentFocus else null
+        val channelRow = focus?.let { channelList.findContainingItemView(it) }
+        val groupRow = focus?.let { groupList.findContainingItemView(it) }
+        val channelPos = channelRow?.let { channelList.getChildAdapterPosition(it) } ?: RecyclerView.NO_POSITION
+        val groupPos = groupRow?.let { groupList.getChildAdapterPosition(it) } ?: RecyclerView.NO_POSITION
+
+        when (code) {
+            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                // In the list, CH+/CH- jump a page at a time; otherwise they change channel.
+                if (channelPos != RecyclerView.NO_POSITION) moveInList(channelList, visibleChannels.size, channelPos, -PAGE_SIZE)
+                else zap(+1)
+                return true
+            }
+            KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                if (channelPos != RecyclerView.NO_POSITION) moveInList(channelList, visibleChannels.size, channelPos, PAGE_SIZE)
+                else zap(-1)
+                return true
+            }
+        }
+
         if (overlayVisible) {
-            val focus = currentFocus
-            val inChannels = focus != null && channelList.findContainingItemView(focus) != null
-            val inGroups = focus != null && groupList.findContainingItemView(focus) != null
+            val inChannels = channelRow != null
+            val inGroups = groupRow != null
+            val upDown = when (code) {
+                KeyEvent.KEYCODE_DPAD_UP -> -1
+                KeyEvent.KEYCODE_DPAD_DOWN -> 1
+                else -> 0
+            }
             when {
+                // Up from the first search result goes back to the search box.
+                upDown < 0 && channelPos == 0 && searchBox.visibility == View.VISIBLE -> {
+                    searchBox.requestFocus()
+                    return true
+                }
+                // Keep Up/Down inside the list, however fast you scroll.
+                upDown != 0 && channelPos != RecyclerView.NO_POSITION -> {
+                    moveInList(channelList, visibleChannels.size, channelPos, upDown)
+                    return true
+                }
+                upDown != 0 && groupPos != RecyclerView.NO_POSITION -> {
+                    if (upDown < 0 && groupPos == 0) {
+                        findViewById<View>(R.id.guide_button).requestFocus() // up to the buttons
+                    } else {
+                        moveInList(groupList, groups.size, groupPos, upDown)
+                    }
+                    return true
+                }
                 code == KeyEvent.KEYCODE_MENU && inChannels -> {
-                    val row = channelList.findContainingItemView(focus!!)!!
-                    onChannelLongClick(channelList.getChildAdapterPosition(row))
+                    onChannelLongClick(channelPos)
                     return true
                 }
                 code == KeyEvent.KEYCODE_DPAD_LEFT && inChannels -> {
@@ -795,6 +1002,24 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         return true
     }
 
+    /**
+     * Moves the highlight within one list, stopping at the top and bottom
+     * instead of letting it jump across to the other column.
+     */
+    private fun moveInList(list: RecyclerView, count: Int, from: Int, delta: Int) {
+        if (count == 0 || from == RecyclerView.NO_POSITION) return
+        val target = (from + delta).coerceIn(0, count - 1)
+        if (target == from) return
+        val row = list.findViewHolderForAdapterPosition(target)?.itemView
+        if (row != null && Math.abs(delta) == 1) {
+            row.requestFocus() // the list scrolls itself to keep it on screen
+        } else {
+            (list.layoutManager as LinearLayoutManager)
+                .scrollToPositionWithOffset(target, list.height / 3)
+            requestFocusAt(list, target, 0)
+        }
+    }
+
     /** Guide button: open the guide, or close it if it's already showing. */
     private fun pressGuide() {
         when {
@@ -808,7 +1033,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun handleBack() {
         val now = SystemClock.uptimeMillis()
         val overlayVisible = overlay.visibility == View.VISIBLE
+        val inGroups = currentFocus?.let { groupList.findContainingItemView(it) } != null
 
+        // In a country's list on the left, Back goes up to the list of countries.
+        if (overlayVisible && inGroups && browseCountry != null) {
+            closeCountry()
+            return
+        }
         if (overlayVisible && currentChannel != null) {
             hideOverlay() // back to the picture
             return
@@ -851,5 +1082,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         } else {
             toast(getString(R.string.no_such_channel, number))
         }
+    }
+
+    companion object {
+        /** Rows jumped by CH+/CH- while the channel list is open. */
+        private const val PAGE_SIZE = 8
     }
 }

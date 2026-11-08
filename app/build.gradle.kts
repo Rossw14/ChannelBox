@@ -11,8 +11,8 @@ android {
         applicationId = "uk.co.channelbox"
         minSdk = 21
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "1.3"
 
         // When built on GitHub, point the app at the TV guide that this
         // project's "Update TV guide" job publishes on its "guide" branch.

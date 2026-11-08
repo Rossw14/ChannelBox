@@ -9,12 +9,20 @@ object ChannelMerger {
 
     private val QUALITY = Regex("""^(\d{3,4})[pi]$""")
 
-    fun merge(entries: List<PlaylistEntry>): List<Channel> {
+    /**
+     * @param countryByUrl which countries each stream link is listed under
+     * @param customUrls stream links that came from your own playlist
+     */
+    fun merge(
+        entries: List<PlaylistEntry>,
+        countryByUrl: Map<String, Set<String>>,
+        customUrls: Set<String>,
+    ): List<Channel> {
         val buckets = LinkedHashMap<String, MutableList<PlaylistEntry>>()
         for (entry in entries) {
             buckets.getOrPut(keyFor(entry)) { ArrayList() }.add(entry)
         }
-        return buckets.map { (key, list) -> build(key, list) }
+        return buckets.map { (key, list) -> build(key, list, countryByUrl, customUrls) }
     }
 
     private fun baseId(tvgId: String?): String? =
@@ -26,7 +34,12 @@ object ChannelMerger {
         return if (simple.isNotEmpty()) "name:$simple" else "url:${entry.url}"
     }
 
-    private fun build(key: String, list: List<PlaylistEntry>): Channel {
+    private fun build(
+        key: String,
+        list: List<PlaylistEntry>,
+        countryByUrl: Map<String, Set<String>>,
+        customUrls: Set<String>,
+    ): Channel {
         val first = list.first()
 
         val groups = LinkedHashSet<String>()
@@ -34,8 +47,14 @@ object ChannelMerger {
         if (groups.size > 1) groups.remove(M3uParser.OTHER)
 
         val seenUrls = HashSet<String>()
-        val streams = list
-            .filter { seenUrls.add(it.url) }
+        val unique = list.filter { seenUrls.add(it.url) }
+
+        val countries = LinkedHashSet<String>()
+        unique.forEach { e -> countryByUrl[e.url]?.let { countries.addAll(it) } }
+        val isCustom = unique.any { it.url in customUrls && countryByUrl[it.url] == null }
+        if (countries.isEmpty() && !isCustom) countries.add(M3uParser.OTHER)
+
+        val streams = unique
             .map { Stream(it.url, it.userAgent, it.referrer, Names.split(it.name).second) }
             .sortedBy { score(it) }
 
@@ -44,6 +63,8 @@ object ChannelMerger {
             name = Names.split(first.name).first,
             logo = list.firstNotNullOfOrNull { it.logo },
             groups = groups.toList(),
+            countries = countries.toList(),
+            isCustom = isCustom,
             guideId = list.firstNotNullOfOrNull { baseId(it.tvgId) },
             streams = streams,
         )

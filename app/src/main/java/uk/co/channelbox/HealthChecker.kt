@@ -80,7 +80,7 @@ class HealthChecker(context: Context) {
         val todo = channels.filter { channelStatus(it) == null }
         if (todo.isEmpty()) return
         val done = AtomicInteger()
-        val pool = Executors.newFixedThreadPool(8)
+        val pool = Executors.newFixedThreadPool(16)
         for (channel in todo) {
             pool.execute {
                 if (!isCancelled()) {
@@ -186,7 +186,7 @@ class HealthChecker(context: Context) {
     }
 
     companion object {
-        private const val OK_MAX_AGE_MS = 3L * 60 * 60 * 1000      // 3 hours
+        private const val OK_MAX_AGE_MS = 6L * 60 * 60 * 1000      // 6 hours
         private const val FAILED_MAX_AGE_MS = 3L * 60 * 60 * 1000  // 3 hours
     }
 }

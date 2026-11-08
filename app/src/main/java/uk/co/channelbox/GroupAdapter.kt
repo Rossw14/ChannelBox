@@ -44,12 +44,13 @@ class GroupAdapter(private val listener: Listener) :
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val group = items[position]
-        holder.name.text = when (group.kind) {
-            Group.Kind.FAVOURITES -> holder.itemView.context.getString(R.string.favourites)
-            Group.Kind.ALL -> holder.itemView.context.getString(R.string.all_channels)
-            Group.Kind.CATEGORY -> group.name
+        holder.name.text = group.label
+        val showCount = group.kind != Group.Kind.BACK && group.kind != Group.Kind.SEARCH
+        holder.count.text = when {
+            !showCount -> ""
+            group.kind == Group.Kind.COUNTRY -> "${group.channels.size}  ›"
+            else -> group.channels.size.toString()
         }
-        holder.count.text = group.channels.size.toString()
         holder.itemView.isActivated = position == selected
     }
 

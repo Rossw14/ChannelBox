@@ -11,26 +11,39 @@ data class Stream(
 
 /** A single channel in the list, with all of its streams merged together. */
 class Channel(
-    /** Stable key used for favourites and "last watched". */
+    /** Stable key used for favourites, "recently watched" and "last watched". */
     val id: String,
     val name: String,
     val logo: String?,
+    /** Categories, e.g. News, Kids. */
     val groups: List<String>,
+    /** Countries it's listed under, e.g. "United Kingdom". */
+    val countries: List<String>,
+    /** True if it only comes from your own playlist (always shown, whatever countries you pick). */
+    val isCustom: Boolean,
     /** Base tvg-id (lower case, no "@feed") used to find TV guide listings. */
     val guideId: String?,
     /** Best stream first. */
     val streams: List<Stream>,
 ) {
     fun hasUrl(urls: Set<String>): Boolean = streams.any { it.url in urls }
+
+    /** Lower-case text that search looks through. */
+    val searchText: String by lazy {
+        (listOf(name) + groups + countries).joinToString(" ").lowercase()
+    }
 }
 
-/** A row in the left-hand list: Favourites, All channels, or a category. */
+/** A row in the left-hand list. */
 data class Group(
-    val name: String,
+    /** Stable identity, e.g. "country:United Kingdom" or "cat:News". */
+    val key: String,
+    /** What's shown on screen. */
+    val label: String,
     val channels: List<Channel>,
     val kind: Kind,
 ) {
-    enum class Kind { FAVOURITES, ALL, CATEGORY }
+    enum class Kind { FAVOURITES, RECENT, SEARCH, ALL, COUNTRY, MY_PLAYLIST, BACK, CATEGORY }
 }
 
 object Names {

@@ -11,7 +11,7 @@
     <string name="loading_channels">Loading channels…</string>
     <string name="no_channels">No channels to show. Check the TV is online, then choose Refresh, or pick some lists in Settings.</string>
     <string name="some_lists_failed">Some channel lists couldn\'t be updated:\n%1$s</string>
-    <string name="remote_hint">OK: watch · Hold OK: favourite · Guide: TV guide · ▲▼ CH+/−: change channel</string>
+    <string name="remote_hint">OK: watch / open · Hold OK: favourite · Guide: TV guide · CH+/−: jump a page · Back: up a level</string>
     <string name="unavailable">Not working right now</string>
     <string name="stream_count">%1$d streams</string>
 
@@ -44,9 +44,25 @@
     <string name="press_back_again">Press Back again to exit</string>
     <string name="no_such_channel">There\'s no channel %1$d in this list</string>
 
+    <string name="recent">🕘 Recently watched</string>
+    <string name="search">🔍 Search</string>
+    <string name="my_playlist">My playlist</string>
+    <string name="back_to_countries">‹ All countries</string>
+    <string name="all_in_country">All %1$s channels</string>
+    <string name="search_hint">Channel name, e.g. news or Bloomberg</string>
+    <string name="search_prompt">Press OK on the box above to type, or use the microphone button on the on-screen keyboard.</string>
+    <string name="search_none">No channels match \"%1$s\".</string>
+    <string name="nothing_here">No working channels here right now.</string>
+
+    <string name="free_channels_heading">Free channels</string>
+    <string name="iptv_org_enabled">Include free channels from iptv-org (about 10,000 worldwide)</string>
+    <string name="countries_heading">Countries</string>
+    <string name="countries_help">Pick the countries to show. Fewer countries means a tidier list and faster checking.</string>
+    <string name="all_countries">Every country (all channels)</string>
+    <string name="country_with_count">%1$s (%2$d)</string>
+    <string name="need_a_country">Pick at least one country, or tick Every country</string>
+
     <string name="settings_title">Settings</string>
-    <string name="free_lists_heading">Free channel lists</string>
-    <string name="free_lists_help">Publicly available streams collected by the open-source iptv-org project. Channels that appear more than once are merged, with the extra links kept as automatic backups.</string>
     <string name="channels_heading">Channels</string>
     <string name="hide_offline">Hide channels that aren\'t working (checked automatically every few hours)</string>
     <string name="custom_heading">Your own playlist (optional)</string>
@@ -56,5 +72,5 @@
     <string name="cancel">Cancel</string>
     <string name="saved">Saved. Reloading channels…</string>
     <string name="url_invalid">The link should start with http:// or https://</string>
-    <string name="need_a_source">Pick at least one list or add your own link</string>
+    <string name="need_a_source">Turn on the free channels or add your own playlist link</string>
 </resources>

@@ -3,25 +3,22 @@ package uk.co.channelbox
 import android.content.Context
 import java.io.File
 
-data class PlaylistSource(val id: String, val label: String, val url: String)
-
 /**
- * Downloads the chosen playlists, keeps a copy on the TV so the app still
- * starts if a list can't be reached, and merges them into one channel list.
+ * Downloads the channel lists, keeps a copy on the TV so the app still starts
+ * if a list can't be reached, and merges everything into one channel list.
+ *
+ * The free channels come from iptv-org's full list (about 10,000 channels).
+ * Two versions of it are downloaded: one grouped by category and one grouped
+ * by country. They're joined by stream link so every channel knows both.
  */
 object PlaylistRepository {
 
     private const val BASE = "https://iptv-org.github.io/iptv"
+    private const val BY_CATEGORY_URL = "$BASE/index.m3u"
+    private const val BY_COUNTRY_URL = "$BASE/index.country.m3u"
 
-    /** Free, publicly available channel lists maintained by the iptv-org project. */
-    val BUILT_IN = listOf(
-        PlaylistSource("uk", "UK channels", "$BASE/countries/uk.m3u"),
-        PlaylistSource("ie", "Ireland channels", "$BASE/countries/ie.m3u"),
-        PlaylistSource("news", "News channels (worldwide)", "$BASE/categories/news.m3u"),
-        PlaylistSource("eng", "English-language channels (worldwide, large)", "$BASE/languages/eng.m3u"),
-    )
-
-    private const val CACHE_MAX_AGE_MS = 6L * 60 * 60 * 1000 // 6 hours
+    private const val CACHE_MAX_AGE_MS = 12L * 60 * 60 * 1000 // 12 hours
+    private const val COUNTRIES_FILE = "countries.txt"
 
     data class LoadResult(
         val channels: List<Channel>,
@@ -30,43 +27,85 @@ object PlaylistRepository {
     )
 
     fun load(context: Context, prefs: Prefs, forceRefresh: Boolean): LoadResult {
-        val sources = ArrayList<PlaylistSource>()
-        val custom = prefs.customUrl.trim()
-        if (custom.isNotEmpty()) sources.add(PlaylistSource("custom", "Your playlist", custom))
-        val enabled = prefs.enabledSources
-        sources.addAll(BUILT_IN.filter { it.id in enabled })
-
         val entries = ArrayList<PlaylistEntry>()
         val guideUrls = ArrayList<String>()
         val errors = ArrayList<String>()
+        val customUrls = HashSet<String>()
+        val countryByUrl = HashMap<String, MutableSet<String>>()
 
-        for (source in sources) {
-            val cache = File(context.filesDir, "playlist_${source.id}_${source.url.hashCode()}.m3u")
-            val isFresh = cache.exists() &&
-                System.currentTimeMillis() - cache.lastModified() < CACHE_MAX_AGE_MS
-
-            val text: String? = if (!forceRefresh && isFresh) {
-                cache.readText()
-            } else {
-                try {
-                    val downloaded = String(Net.get(source.url), Charsets.UTF_8)
-                    if (!M3uParser.looksLikePlaylist(downloaded)) {
-                        throw IllegalStateException("that link isn't an M3U playlist")
-                    }
-                    cache.writeText(downloaded)
-                    downloaded
-                } catch (e: Exception) {
-                    errors.add("${source.label}: ${e.message ?: "couldn't download"}")
-                    if (cache.exists()) cache.readText() else null
-                }
-            }
-
-            if (text != null) {
+        val custom = prefs.customUrl.trim()
+        if (custom.isNotEmpty()) {
+            fetch(context, "custom", custom, "Your playlist", forceRefresh, errors)?.let { text ->
                 val parsed = M3uParser.parse(text)
                 entries.addAll(parsed.entries)
+                parsed.entries.forEach { customUrls.add(it.url) }
                 guideUrls.addAll(parsed.guideUrls)
             }
         }
-        return LoadResult(ChannelMerger.merge(entries), guideUrls.distinct(), errors)
+
+        if (prefs.iptvOrgEnabled) {
+            fetch(context, "iptvorg_category", BY_CATEGORY_URL, "Free channels", forceRefresh, errors)?.let {
+                entries.addAll(M3uParser.parse(it).entries)
+            }
+            fetch(context, "iptvorg_country", BY_COUNTRY_URL, "Free channels by country", forceRefresh, errors)?.let {
+                for (e in M3uParser.parse(it).entries) {
+                    countryByUrl.getOrPut(e.url) { LinkedHashSet() }.addAll(e.groups)
+                }
+            }
+        }
+
+        val channels = ChannelMerger.merge(entries, countryByUrl, customUrls)
+        saveCountryList(context, channels)
+        return LoadResult(channels, guideUrls.distinct(), errors)
+    }
+
+    /** Countries and how many channels each has, for the Settings screen. */
+    fun savedCountries(context: Context): List<Pair<String, Int>> = try {
+        File(context.filesDir, COUNTRIES_FILE).readLines().mapNotNull { line ->
+            val name = line.substringBefore('\t')
+            val count = line.substringAfter('\t', "").toIntOrNull()
+            if (name.isEmpty() || count == null) null else Pair(name, count)
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun saveCountryList(context: Context, channels: List<Channel>) {
+        val counts = HashMap<String, Int>()
+        for (c in channels) for (country in c.countries) counts[country] = (counts[country] ?: 0) + 1
+        if (counts.isEmpty()) return
+        try {
+            File(context.filesDir, COUNTRIES_FILE).writeText(
+                counts.entries.sortedBy { it.key.lowercase() }
+                    .joinToString("\n") { "${it.key}\t${it.value}" }
+            )
+        } catch (e: Exception) {
+            // Settings will fall back to a short default list.
+        }
+    }
+
+    private fun fetch(
+        context: Context,
+        id: String,
+        url: String,
+        label: String,
+        forceRefresh: Boolean,
+        errors: MutableList<String>,
+    ): String? {
+        val cache = File(context.filesDir, "playlist_${id}_${url.hashCode()}.m3u")
+        val isFresh = cache.exists() &&
+            System.currentTimeMillis() - cache.lastModified() < CACHE_MAX_AGE_MS
+        if (!forceRefresh && isFresh) return cache.readText()
+        return try {
+            val downloaded = String(Net.get(url), Charsets.UTF_8)
+            if (!M3uParser.looksLikePlaylist(downloaded)) {
+                throw IllegalStateException("that link isn't an M3U playlist")
+            }
+            cache.writeText(downloaded)
+            downloaded
+        } catch (e: Exception) {
+            errors.add("$label: ${e.message ?: "couldn't download"}")
+            if (cache.exists()) cache.readText() else null
+        }
     }
 }
