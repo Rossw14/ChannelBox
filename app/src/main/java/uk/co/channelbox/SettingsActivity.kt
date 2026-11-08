@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.Toast
 
 /** Choose which channels to show, and add your own M3U link. */
@@ -71,6 +72,16 @@ class SettingsActivity : Activity() {
         val hideOffline = findViewById<CheckBox>(R.id.hide_offline)
         hideOffline.isChecked = prefs.hideOffline
 
+        val qualityGroup = findViewById<RadioGroup>(R.id.quality_group)
+        val qualityOptions = listOf(
+            R.id.quality_auto to 0,
+            R.id.quality_1080 to 1080,
+            R.id.quality_720 to 720,
+            R.id.quality_480 to 480,
+        )
+        val savedQuality = prefs.maxHeight
+        qualityGroup.check(qualityOptions.firstOrNull { it.second == savedQuality }?.first ?: R.id.quality_auto)
+
         val urlField = findViewById<EditText>(R.id.custom_url)
         urlField.setText(prefs.customUrl)
 
@@ -95,6 +106,7 @@ class SettingsActivity : Activity() {
             if (chosen.isNotEmpty()) prefs.countries = chosen
             prefs.customUrl = url
             prefs.hideOffline = hideOffline.isChecked
+            prefs.maxHeight = qualityOptions.firstOrNull { it.first == qualityGroup.checkedRadioButtonId }?.second ?: 0
             prefs.settingsVersion = prefs.settingsVersion + 1
             toast(getString(R.string.saved))
             finish()

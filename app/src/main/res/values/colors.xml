@@ -12,4 +12,5 @@
     <color name="row_active">#33FFFFFF</color>
     <color name="button_idle">#26FFFFFF</color>
     <color name="logo_bg">#FF2A313C</color>
+    <color name="guide_bg">#FF0E1217</color>
 </resources>

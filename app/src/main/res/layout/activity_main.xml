@@ -6,6 +6,94 @@
     android:background="@color/black"
     android:keepScreenOn="true">
 
+    <!-- Full-screen TV guide. The live picture shrinks into the top-right corner. -->
+    <LinearLayout
+        android:id="@+id/guide_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/guide_bg"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/guide_top_height"
+            android:layout_marginStart="48dp"
+            android:layout_marginEnd="@dimen/guide_info_end_margin"
+            android:orientation="vertical"
+            android:paddingTop="24dp">
+
+            <TextView
+                android:id="@+id/guide_heading"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/accent"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/guide_channel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/text_secondary"
+                android:textSize="17sp" />
+
+            <TextView
+                android:id="@+id/guide_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:textColor="@color/white"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/guide_time"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/accent"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/guide_desc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:ellipsize="end"
+                android:maxLines="3"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <uk.co.channelbox.EpgGridView
+            android:id="@+id/epg_grid"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginStart="48dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="48dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="48dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginEnd="48dp"
+            android:layout_marginBottom="14dp"
+            android:text="@string/guide_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+
     <androidx.media3.ui.PlayerView
         android:id="@+id/player_view"
         android:layout_width="match_parent"
@@ -258,53 +346,6 @@
                 android:textSize="13sp" />
         </LinearLayout>
 
-        <!-- TV guide: schedule for the highlighted channel -->
-        <LinearLayout
-            android:id="@+id/schedule_column"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="@color/panel_dark"
-            android:orientation="vertical"
-            android:paddingStart="20dp"
-            android:paddingTop="27dp"
-            android:paddingEnd="48dp"
-            android:paddingBottom="16dp"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/tv_guide"
-                android:textColor="@color/accent"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/schedule_title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:ellipsize="end"
-                android:singleLine="true"
-                android:textColor="@color/white"
-                android:textSize="22sp"
-                android:textStyle="bold" />
-
-            <ScrollView
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:focusable="false"
-                android:scrollbars="none">
-
-                <LinearLayout
-                    android:id="@+id/schedule_list"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical" />
-            </ScrollView>
-        </LinearLayout>
     </LinearLayout>
 
     <!-- Loading -->

@@ -39,6 +39,11 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_LAST_CHANNEL, null)
         set(value) = sp.edit().putString(KEY_LAST_CHANNEL, value).apply()
 
+    /** Highest picture quality to use (e.g. 720), or 0 for automatic. */
+    var maxHeight: Int
+        get() = sp.getInt(KEY_MAX_HEIGHT, 0)
+        set(value) = sp.edit().putInt(KEY_MAX_HEIGHT, value).apply()
+
     var hideOffline: Boolean
         get() = sp.getBoolean(KEY_HIDE_OFFLINE, true)
         set(value) = sp.edit().putBoolean(KEY_HIDE_OFFLINE, value).apply()
@@ -57,6 +62,7 @@ class Prefs(context: Context) {
         private const val KEY_RECENT = "recent"
         private const val KEY_LAST_CHANNEL = "last_channel"
         private const val KEY_HIDE_OFFLINE = "hide_offline"
+        private const val KEY_MAX_HEIGHT = "max_height"
         private const val KEY_VERSION = "settings_version"
 
         const val HOME_COUNTRY = "United Kingdom"

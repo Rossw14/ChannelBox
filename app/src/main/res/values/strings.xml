@@ -37,6 +37,15 @@
     <string name="guide_failed">TV guide unavailable</string>
     <string name="guide_not_set_up_long">The TV guide hasn\'t been set up for this copy of ChannelBox. See the README for the one-time GitHub step.</string>
     <string name="guide_failed_long">The TV guide couldn\'t be downloaded. If you\'ve only just set it up, the first guide can take up to an hour to appear. Choose Refresh to try again.</string>
+    <string name="guide_no_info">No information</string>
+    <string name="guide_hint">OK: watch · ▲▼ channels · ◀▶ later / earlier · CH+/−: page · Numbers: jump to channel · Back or Guide: close</string>
+    <string name="guide_heading">TV GUIDE · %1$s</string>
+    <string name="guide_channel_line">%1$d  %2$s</string>
+    <string name="guide_no_listings">No listings for this channel</string>
+    <string name="guide_time_now">%1$s – %2$s · On now · %3$d min left</string>
+    <string name="guide_time_later">%1$s – %2$s</string>
+    <string name="guide_time_day">%1$s %2$s – %3$s</string>
+    <string name="guide_empty">There are no channels in this list.</string>
     <string name="no_guide_for_channel">No listings for this channel.</string>
 
     <string name="fav_added">Added %1$s to Favourites</string>
@@ -65,6 +74,12 @@
     <string name="settings_title">Settings</string>
     <string name="channels_heading">Channels</string>
     <string name="hide_offline">Hide channels that aren\'t working (checked automatically every few hours)</string>
+    <string name="quality_heading">Picture quality</string>
+    <string name="quality_help">If channels stutter or keep buffering, choose a lower limit. The picture is a little softer, but it needs much less internet speed.</string>
+    <string name="quality_auto">Automatic (best your connection can manage)</string>
+    <string name="quality_1080">Up to Full HD (1080p)</string>
+    <string name="quality_720">Up to HD (720p) – recommended for slower broadband</string>
+    <string name="quality_480">Up to standard definition (480p) – smoothest</string>
     <string name="custom_heading">Your own playlist (optional)</string>
     <string name="custom_help">Paste an M3U or M3U8 link you\'re entitled to use. Its channels appear first, and if it includes a TV guide link that\'s used too. Tip: the Google TV app on your phone lets you type with your phone\'s keyboard.</string>
     <string name="custom_hint">https://example.com/playlist.m3u</string>

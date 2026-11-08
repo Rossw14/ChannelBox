@@ -28,6 +28,9 @@ class GuideData(private val byChannel: Map<String, List<Programme>>) {
     private fun listFor(channel: Channel): List<Programme> =
         channel.guideId?.let { byChannel[it] } ?: emptyList()
 
+    /** Everything we have for the channel, in time order. */
+    fun programmes(channel: Channel): List<Programme> = listFor(channel)
+
     fun current(channel: Channel, now: Long): Programme? =
         listFor(channel).firstOrNull { it.start <= now && it.stop > now }
 

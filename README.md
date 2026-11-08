@@ -1,14 +1,17 @@
 # ChannelBox: an IPTV player for Sony Google TV / Android TV
 
-ChannelBox is a live TV app built for the TV remote. On first launch it loads the free UK
-channel list (about 300 publicly available streams collected by the open-source
-[iptv-org](https://github.com/iptv-org/iptv) project), grouped by category with channel logos.
-You can add your own M3U playlist link later in Settings.
+ChannelBox is a live TV app built for the TV remote. It loads the full free channel list from the
+open-source [iptv-org](https://github.com/iptv-org/iptv) project (about 10,000 publicly available
+channels from 187 countries), organised by country and then category, with channel logos.
+Out of the box it shows the UK, Ireland, the USA, Canada, Australia and New Zealand; you can change
+that in Settings. You can also add your own M3U playlist link.
 
 ## What it does
 
 - A full-screen live player for HLS (`.m3u8`), DASH (`.mpd`) and plain stream links.
-- A side panel listing **Favourites**, **All channels** and each category (News, Entertainment, Kids and so on).
+- A side panel with **Favourites**, **Recently watched**, **Search** and your countries.
+  Open a country to see its categories (News, Entertainment, Kids and so on).
+- **Search** across every channel you've chosen, typed with the remote or the on-screen keyboard's mic.
 - Channel changing with ▲▼ or CH+/CH−, plus typed channel numbers.
 - Favourites: hold OK on a channel, or press the Menu button.
 - When it starts, it carries on with the channel you were last watching.
@@ -16,7 +19,10 @@ You can add your own M3U playlist link later in Settings.
 - **Offline channels are hidden.** The TV quietly checks which channels answer, every few hours.
   You can switch this off in Settings. Changing channel with ▲▼ skips channels that are down.
 - **TV guide.** Each channel row shows what's on now, and the banner shows Now and Next.
-  The **Guide** button on the remote (or on screen) opens the day's schedule for the highlighted channel.
+  The **Guide** button on the remote (or on screen) opens a full-screen, Sky-style grid guide for the
+  list you're in, with programme details at the top and the live picture carrying on in the top-right corner.
+- **Picture quality limit** in Settings (Automatic, 1080p, 720p or 480p) for slower broadband, plus a bigger
+  playback buffer so streams stutter less.
 - Your playlist link's channels are listed first, with the free lists merged in after.
 - Channel lists are kept on the TV, so the app still opens if a list is briefly unreachable.
 
@@ -27,17 +33,28 @@ You can add your own M3U playlist link later in Settings.
 | OK or ◀ | Open the channel list |
 | ▲ / ▼, CH+ / CH− | Previous / next channel |
 | ▶ or Info | Show what's on |
-| Guide | Open the TV guide (press again to close) |
+| Guide | Open the TV guide (press again, or Back, to close) |
 | Number keys | Jump to a channel number |
 | Menu | Add or remove the current channel from Favourites |
 | Back, Back | Exit |
 
 | In the channel list | |
 |---|---|
-| OK | Watch the channel |
+| OK | Watch the channel, or open a country / start a search |
 | Hold OK or Menu | Add or remove from Favourites |
+| ▲ / ▼ | Move through the list (stops at the top and bottom) |
+| CH+ / CH− | Jump a page up or down the list |
 | ◀ / ▶ | Move between categories and channels |
-| Back | Return to the picture |
+| Back | In a country's list on the left: back to the countries. Otherwise: return to the picture |
+
+| In the TV guide | |
+|---|---|
+| ▲ / ▼ | Move between channels |
+| ◀ / ▶ | Earlier / later programmes |
+| CH+ / CH− | Page up / down |
+| Number keys | Jump to that channel |
+| OK | Watch that channel |
+| Back or Guide | Close the guide |
 
 ## Getting the app onto your TV
 

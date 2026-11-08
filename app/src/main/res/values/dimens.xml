@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- TV guide page: the live picture sits top-right at this size -->
+    <dimen name="guide_preview_width">384dp</dimen>
+    <dimen name="guide_preview_height">216dp</dimen>
+    <dimen name="guide_preview_top">20dp</dimen>
+    <dimen name="guide_preview_end">48dp</dimen>
+    <dimen name="guide_top_height">244dp</dimen>
+    <dimen name="guide_info_end_margin">456dp</dimen>
+</resources>

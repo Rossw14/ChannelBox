@@ -24,7 +24,9 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -47,9 +49,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var searchBox: EditText
     private lateinit var emptyText: TextView
     private lateinit var statusText: TextView
-    private lateinit var scheduleColumn: View
-    private lateinit var scheduleTitle: TextView
-    private lateinit var scheduleList: LinearLayout
+    private lateinit var guideScreen: View
+    private lateinit var epgGrid: EpgGridView
+    private lateinit var guideHeading: TextView
+    private lateinit var guideChannel: TextView
+    private lateinit var guideTitle: TextView
+    private lateinit var guideTime: TextView
+    private lateinit var guideDesc: TextView
     private lateinit var banner: View
     private lateinit var bannerNumber: TextView
     private lateinit var bannerName: TextView
@@ -83,7 +89,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var groups: List<Group> = emptyList()
     private var currentGroupIndex = 0
     private var visibleChannels: List<Channel> = emptyList()
-    private var guideMode = false
+    private var guideOpen = false
+    private var guideChannels: List<Channel> = emptyList()
     /** null = the top level (countries); otherwise the country being browsed. */
     private var browseCountry: String? = null
     private var searchQuery = ""
@@ -126,9 +133,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         searchBox = findViewById(R.id.search_box)
         emptyText = findViewById(R.id.empty_text)
         statusText = findViewById(R.id.status_text)
-        scheduleColumn = findViewById(R.id.schedule_column)
-        scheduleTitle = findViewById(R.id.schedule_title)
-        scheduleList = findViewById(R.id.schedule_list)
+        guideScreen = findViewById(R.id.guide_screen)
+        epgGrid = findViewById(R.id.epg_grid)
+        guideHeading = findViewById(R.id.guide_heading)
+        guideChannel = findViewById(R.id.guide_channel)
+        guideTitle = findViewById(R.id.guide_title)
+        guideTime = findViewById(R.id.guide_time)
+        guideDesc = findViewById(R.id.guide_desc)
         banner = findViewById(R.id.banner)
         bannerNumber = findViewById(R.id.banner_number)
         bannerName = findViewById(R.id.banner_name)
@@ -169,7 +180,17 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             true
         }
 
-        findViewById<View>(R.id.guide_button).setOnClickListener { setGuideMode(!guideMode) }
+        epgGrid.timeFormat = timeFormat
+        epgGrid.listener = object : EpgGridView.Listener {
+            override fun onGuideFocus(row: Int, programme: Programme?, slotStart: Long) =
+                showGuideInfo(row, programme, slotStart)
+
+            override fun onGuideSelect(row: Int, programme: Programme?) {
+                closeGuide()
+                playChannel(guideChannels, row)
+            }
+        }
+        findViewById<View>(R.id.guide_button).setOnClickListener { openGuide() }
         findViewById<View>(R.id.settings_button).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -263,7 +284,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         if (allChannels.isEmpty()) {
             emptyText.setText(R.string.no_channels)
-            showOverlay(guide = false)
+            showOverlay()
         } else if (currentChannel == null) {
             val last = prefs.lastChannel
             val matches = { c: Channel -> c.id == last || (last != null && c.hasUrl(setOf(last))) }
@@ -278,14 +299,14 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 playChannel(list, list.indexOfFirst(matches))
                 hideOverlay()
             } else {
-                showOverlay(guide = false)
+                showOverlay()
             }
         } else {
             // Settings changed or Refresh pressed while watching: keep playing,
             // but point at the updated version of the channel.
             val playingId = currentChannel?.id
             allChannels.firstOrNull { it.id == playingId }?.let { currentChannel = it }
-            if (overlay.visibility == View.VISIBLE) showOverlay(guideMode)
+            if (overlay.visibility == View.VISIBLE) showOverlay()
         }
         startHealthCheck()
     }
@@ -299,7 +320,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
         updateStatusText()
         channelAdapter.notifyDataSetChanged()
-        if (guideMode) showSchedule(focusedChannel() ?: currentChannel)
+        if (guideOpen) epgGrid.updateGuide(guide)
         if (banner.visibility == View.VISIBLE) currentChannel?.let { showBanner(it, null) }
     }
 
@@ -553,7 +574,24 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     private fun createPlayer() {
         if (player != null) return
-        val exo = ExoPlayer.Builder(this).build()
+        // A bigger safety buffer and a cautious first guess at the connection speed,
+        // so slower broadband stutters less.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(30_000, 60_000, 2_500, 6_000)
+            .build()
+        val bandwidthMeter = DefaultBandwidthMeter.Builder(this)
+            .setInitialBitrateEstimate(1_500_000L)
+            .build()
+        val exo = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
+            .setBandwidthMeter(bandwidthMeter)
+            .build()
+        val maxHeight = prefs.maxHeight
+        if (maxHeight > 0) {
+            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                .setMaxVideoSize(maxHeight * 2, maxHeight)
+                .build()
+        }
         exo.setAudioAttributes(AudioAttributes.DEFAULT, true)
         exo.playWhenReady = true
         exo.addListener(object : Player.Listener {
@@ -595,7 +633,12 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         recent.add(0, channel.id)
         prefs.recent = recent.take(30)
 
-        streamQueue = health.ordered(channel)
+        // With a quality limit set, try streams within the limit first.
+        val maxHeight = prefs.maxHeight
+        streamQueue = health.ordered(channel).let { ordered ->
+            if (maxHeight <= 0) ordered
+            else ordered.sortedBy { s -> if ((s.height ?: 0) > maxHeight) 1 else 0 }
+        }
         streamIndex = 0
         triedHlsFallback = false
         streamQueue.firstOrNull()?.let { startPlayback(it, forceHls = false) }
@@ -725,10 +768,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         handler.postDelayed(hideBanner, if (status == null) 5_000L else 8_000L)
     }
 
-    private fun showOverlay(guide: Boolean) {
+    private fun showOverlay() {
+        if (guideOpen) closeGuide()
         overlay.visibility = View.VISIBLE
         banner.visibility = View.GONE
-        setGuideMode(guide)
         if (visibleChannels.isEmpty()) {
             focusGroup(currentGroupIndex)
         } else {
@@ -740,61 +783,111 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun hideOverlay() {
         if (currentChannel == null) return
         overlay.visibility = View.GONE
-        if (guideMode) setGuideMode(false)
     }
 
-    /** The TV guide panel: the picker widens to full screen with a schedule on the right. */
-    private fun setGuideMode(on: Boolean) {
-        guideMode = on
-        scheduleColumn.visibility = if (on) View.VISIBLE else View.GONE
-        val params = overlay.layoutParams
-        params.width = if (on) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
-        overlay.layoutParams = params
-        if (on) showSchedule(focusedChannel() ?: currentChannel ?: visibleChannels.firstOrNull())
+    // ---------------------------------------------------------------- TV guide page
+
+    private val guideTick = object : Runnable {
+        override fun run() {
+            epgGrid.tick()
+            handler.postDelayed(this, 60_000L)
+        }
     }
 
-    private fun showSchedule(channel: Channel?) {
-        scheduleList.removeAllViews()
-        if (channel == null) {
-            scheduleTitle.text = ""
+    /** Opens the full-screen guide for the list chosen on the left (e.g. UK channels). */
+    private fun openGuide() {
+        val group = groups.getOrNull(currentGroupIndex)
+        guideChannels = when {
+            visibleChannels.isNotEmpty() -> visibleChannels
+            else -> shownChannels()
+        }
+        if (guideChannels.isEmpty()) {
+            toast(getString(R.string.guide_empty))
             return
         }
-        scheduleTitle.text = channel.name
+        val listName = when {
+            group == null -> getString(R.string.all_channels)
+            group.kind == Group.Kind.BACK -> browseCountry.orEmpty()
+            else -> group.label
+        }
+        guideHeading.text = getString(R.string.guide_heading, listName)
 
+        guideOpen = true
+        overlay.visibility = View.GONE
+        banner.visibility = View.GONE
+        guideScreen.visibility = View.VISIBLE
+
+        // Shrink the live picture into the top-right corner.
+        val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
+        params.width = resources.getDimensionPixelSize(R.dimen.guide_preview_width)
+        params.height = resources.getDimensionPixelSize(R.dimen.guide_preview_height)
+        params.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+        params.topMargin = resources.getDimensionPixelSize(R.dimen.guide_preview_top)
+        params.marginEnd = resources.getDimensionPixelSize(R.dimen.guide_preview_end)
+        playerView.layoutParams = params
+
+        val startRow = guideChannels.indexOfFirst { it.id == currentChannel?.id }.coerceAtLeast(0)
+        epgGrid.playingId = currentChannel?.id
+        epgGrid.setData(guideChannels, guide, startRow)
+        epgGrid.requestFocus()
+        handler.removeCallbacks(guideTick)
+        handler.postDelayed(guideTick, 60_000L)
+    }
+
+    private fun closeGuide() {
+        if (!guideOpen) return
+        guideOpen = false
+        handler.removeCallbacks(guideTick)
+        guideScreen.visibility = View.GONE
+        val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
+        params.width = ViewGroup.LayoutParams.MATCH_PARENT
+        params.height = ViewGroup.LayoutParams.MATCH_PARENT
+        params.topMargin = 0
+        params.marginEnd = 0
+        playerView.layoutParams = params
+    }
+
+    /** Close the guide; if nothing is playing yet, go back to the channel list. */
+    private fun leaveGuide() {
+        closeGuide()
+        if (currentChannel == null) showOverlay()
+    }
+
+    private fun showGuideInfo(row: Int, programme: Programme?, slotStart: Long) {
+        val channel = guideChannels.getOrNull(row) ?: return
+        guideChannel.text = getString(R.string.guide_channel_line, row + 1, channel.name)
+        if (programme == null) {
+            guideTitle.text = getString(R.string.guide_no_listings)
+            guideTime.text = ""
+            guideDesc.text = channel.groups.joinToString(", ")
+            return
+        }
+        guideTitle.text = programme.title
         val now = System.currentTimeMillis()
-        val programmes = guide.upcoming(channel, now).take(14)
-        if (programmes.isEmpty()) {
-            val message = layoutInflater.inflate(R.layout.item_programme, scheduleList, false)
-            message.findViewById<TextView>(R.id.programme_time).visibility = View.GONE
-            message.findViewById<TextView>(R.id.programme_title).text = when (guideState) {
-                GuideState.READY -> getString(R.string.no_guide_for_channel)
-                GuideState.LOADING -> getString(R.string.guide_loading)
-                GuideState.NOT_SET_UP -> getString(R.string.guide_not_set_up_long)
-                GuideState.FAILED -> getString(R.string.guide_failed_long)
-            }
-            message.findViewById<TextView>(R.id.programme_desc).visibility = View.GONE
-            scheduleList.addView(message)
-            return
+        guideTime.text = when {
+            programme.start <= now && programme.stop > now -> getString(
+                R.string.guide_time_now, time(programme.start), time(programme.stop),
+                ((programme.stop - now) / 60_000L).toInt().coerceAtLeast(1),
+            )
+            isSameDay(programme.start, now) -> getString(
+                R.string.guide_time_later, time(programme.start), time(programme.stop),
+            )
+            else -> getString(
+                R.string.guide_time_day, dayName(programme.start), time(programme.start), time(programme.stop),
+            )
         }
-
-        for (p in programmes) {
-            val row = layoutInflater.inflate(R.layout.item_programme, scheduleList, false)
-            val isNow = p.start <= now && p.stop > now
-            row.isActivated = isNow
-            row.findViewById<TextView>(R.id.programme_time).text =
-                if (isNow) getString(R.string.on_now) else time(p.start)
-            row.findViewById<TextView>(R.id.programme_title).text = p.title
-
-            val details = ArrayList<String>()
-            if (isNow) details.add(getString(R.string.until_time, time(p.stop)))
-            p.subtitle?.let { details.add(it) }
-            if (isNow) p.description?.let { details.add(it) }
-            val desc = row.findViewById<TextView>(R.id.programme_desc)
-            desc.text = details.joinToString("\n")
-            desc.visibility = if (details.isEmpty()) View.GONE else View.VISIBLE
-            scheduleList.addView(row)
-        }
+        guideDesc.text = listOfNotNull(programme.subtitle, programme.description).joinToString(" — ")
     }
+
+    private fun isSameDay(a: Long, b: Long): Boolean {
+        val ca = java.util.Calendar.getInstance().apply { timeInMillis = a }
+        val cb = java.util.Calendar.getInstance().apply { timeInMillis = b }
+        return ca.get(java.util.Calendar.YEAR) == cb.get(java.util.Calendar.YEAR) &&
+            ca.get(java.util.Calendar.DAY_OF_YEAR) == cb.get(java.util.Calendar.DAY_OF_YEAR)
+    }
+
+    private fun dayName(millis: Long): String =
+        java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(Date(millis))
 
     private fun focusedChannel(): Channel? {
         val focus = currentFocus ?: return null
@@ -847,9 +940,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         visibleChannels.getOrNull(position)?.let { toggleFavourite(it) }
     }
 
-    override fun onChannelFocused(position: Int) {
-        if (guideMode) showSchedule(visibleChannels.getOrNull(position))
-    }
+    override fun onChannelFocused(position: Int) = Unit
 
     override fun onGroupFocused(position: Int) {
         if (position != currentGroupIndex) selectGroup(position)
@@ -894,6 +985,20 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             return true
         }
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+
+        if (guideOpen) {
+            when (code) {
+                KeyEvent.KEYCODE_GUIDE -> leaveGuide()
+                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> epgGrid.page(-1)
+                KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> epgGrid.page(1)
+                in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> typeDigit(code - KeyEvent.KEYCODE_0)
+                else -> {
+                    if (!epgGrid.hasFocus()) epgGrid.requestFocus()
+                    return super.dispatchKeyEvent(event)
+                }
+            }
+            return true
+        }
 
         if (currentFocus is EditText) {
             // Typing in the search box: only handle leaving it with the arrows.
@@ -993,7 +1098,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER,
-            KeyEvent.KEYCODE_DPAD_LEFT -> showOverlay(guide = false)
+            KeyEvent.KEYCODE_DPAD_LEFT -> showOverlay()
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_INFO -> currentChannel?.let { showBanner(it, null) }
             KeyEvent.KEYCODE_MENU -> currentChannel?.let { toggleFavourite(it) }
@@ -1020,17 +1125,16 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
     }
 
-    /** Guide button: open the guide, or close it if it's already showing. */
+    /** Guide button: open the full-screen guide, or close it if it's showing. */
     private fun pressGuide() {
-        when {
-            overlay.visibility != View.VISIBLE -> showOverlay(guide = true)
-            !guideMode -> setGuideMode(true)
-            currentChannel != null -> hideOverlay()
-            else -> setGuideMode(false)
-        }
+        if (guideOpen) leaveGuide() else openGuide()
     }
 
     private fun handleBack() {
+        if (guideOpen) {
+            leaveGuide()
+            return
+        }
         val now = SystemClock.uptimeMillis()
         val overlayVisible = overlay.visibility == View.VISIBLE
         val inGroups = currentFocus?.let { groupList.findContainingItemView(it) } != null
@@ -1042,10 +1146,6 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
         if (overlayVisible && currentChannel != null) {
             hideOverlay() // back to the picture
-            return
-        }
-        if (overlayVisible && guideMode) {
-            setGuideMode(false)
             return
         }
         if (now - lastBackPress < 2_000) {
@@ -1070,6 +1170,12 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         digits = ""
         numberEntry.visibility = View.GONE
         if (number == null) return
+
+        if (guideOpen) {
+            if (number in 1..guideChannels.size) epgGrid.jumpToRow(number - 1)
+            else toast(getString(R.string.no_such_channel, number))
+            return
+        }
 
         val list = if (overlay.visibility == View.VISIBLE || playingList.isEmpty()) {
             visibleChannels

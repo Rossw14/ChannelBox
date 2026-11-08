@@ -1,3 +1,4 @@
 # Playlists the daily TV guide job collects listings for.
 # One link per line. Add more lines if you turn on other lists in the app's Settings.
 https://iptv-org.github.io/iptv/countries/uk.m3u
+https://iptv-org.github.io/iptv/countries/ie.m3u

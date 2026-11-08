@@ -7,7 +7,15 @@ data class Stream(
     val referrer: String?,
     /** Labels from the playlist, e.g. "720p", "Not 24/7". */
     val tags: List<String>,
-)
+) {
+    /** Picture height from a label like "720p", if the playlist says. */
+    val height: Int?
+        get() = tags.firstNotNullOfOrNull { QUALITY.find(it)?.groupValues?.get(1)?.toIntOrNull() }
+
+    private companion object {
+        val QUALITY = Regex("""^(\d{3,4})[pi]$""")
+    }
+}
 
 /** A single channel in the list, with all of its streams merged together. */
 class Channel(
