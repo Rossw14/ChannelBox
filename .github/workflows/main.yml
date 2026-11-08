@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,3 +31,15 @@ jobs:
         with:
           name: ChannelBox-apk
           path: ChannelBox.apk
+
+      # Publishes the build as the project's latest release, which is where
+      # the app's "Check for updates" button looks.
+      - name: Publish for in-app updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "{\"versionCode\": $((100 + ${{ github.run_number }})), \"versionName\": \"1.5 (build ${{ github.run_number }})\"}" > version.json
+          gh release create "build-${{ github.run_number }}" ChannelBox.apk version.json \
+            --title "ChannelBox build ${{ github.run_number }}" \
+            --notes "Built automatically from the latest code." \
+            --latest

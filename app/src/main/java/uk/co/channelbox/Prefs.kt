@@ -44,6 +44,10 @@ class Prefs(context: Context) {
         get() = sp.getInt(KEY_MAX_HEIGHT, 0)
         set(value) = sp.edit().putInt(KEY_MAX_HEIGHT, value).apply()
 
+    var lastUpdateCheck: Long
+        get() = sp.getLong(KEY_LAST_UPDATE_CHECK, 0L)
+        set(value) = sp.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply()
+
     var hideOffline: Boolean
         get() = sp.getBoolean(KEY_HIDE_OFFLINE, true)
         set(value) = sp.edit().putBoolean(KEY_HIDE_OFFLINE, value).apply()
@@ -63,6 +67,7 @@ class Prefs(context: Context) {
         private const val KEY_LAST_CHANNEL = "last_channel"
         private const val KEY_HIDE_OFFLINE = "hide_offline"
         private const val KEY_MAX_HEIGHT = "max_height"
+        private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         private const val KEY_VERSION = "settings_version"
 
         const val HOME_COUNTRY = "United Kingdom"

@@ -1,6 +1,9 @@
 package uk.co.channelbox
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.widget.Button
+import android.widget.TextView
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
@@ -113,7 +116,63 @@ class SettingsActivity : Activity() {
         }
         findViewById<View>(R.id.cancel_button).setOnClickListener { finish() }
 
+        setUpUpdates()
         iptvOrg.requestFocus()
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    private fun setUpUpdates() {
+        val status = findViewById<TextView>(R.id.update_status)
+        val button = findViewById<Button>(R.id.update_button)
+        val version = Updater.installedVersionName()
+        if (!Updater.isAvailable) {
+            status.text = getString(R.string.updates_unavailable, version)
+            button.visibility = View.GONE
+            return
+        }
+        status.text = getString(R.string.installed_version, version)
+        button.setOnClickListener {
+            button.isEnabled = false
+            button.setText(R.string.checking_updates)
+            Thread {
+                val result = runCatching { Updater.checkForNewer() }
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    button.isEnabled = true
+                    button.setText(R.string.check_updates)
+                    result.onSuccess { release ->
+                        if (release == null) toast(getString(R.string.up_to_date)) else offerUpdate(release)
+                    }.onFailure { e ->
+                        toast(getString(R.string.update_failed, e.message ?: e.javaClass.simpleName))
+                    }
+                }
+            }.start()
+        }
+    }
+
+    private fun offerUpdate(release: Updater.Release) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.update_found_title)
+            .setMessage(getString(R.string.update_found_message, release.versionName))
+            .setPositiveButton(R.string.update_install) { _, _ -> downloadAndInstall() }
+            .setNegativeButton(R.string.update_later, null)
+            .show()
+    }
+
+    private fun downloadAndInstall() {
+        toast(getString(R.string.downloading_update))
+        Thread {
+            val result = runCatching { Updater.download(applicationContext) }
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                result.onSuccess { file ->
+                    if (!Updater.install(this, file)) toast(getString(R.string.update_allow_install))
+                }.onFailure { e ->
+                    toast(getString(R.string.update_failed, e.message ?: e.javaClass.simpleName))
+                }
+            }
+        }.start()
     }
 
     private fun dp(value: Int): Int =

@@ -8,15 +8,32 @@ on:
     paths:
       - guide-playlists.txt
       - tools/make-guide-channels.mjs
+      - tools/merge-guides.mjs
       - .github/workflows/guide.yml
 
 permissions:
   contents: write
 
 jobs:
-  guide:
+  # Read the list of playlists to collect listings for.
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    outputs:
+      lists: ${{ steps.read.outputs.lists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "lists=$(grep -vE '^[[:space:]]*(#|$)' guide-playlists.txt | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  # One job per playlist, all running at the same time.
+  grab:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        list: ${{ fromJson(needs.plan.outputs.lists) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +48,10 @@ jobs:
           npm install --no-audit --no-fund
 
       - name: Work out which channels need listings
-        run: node tools/make-guide-channels.mjs guide-playlists.txt epg/sites custom.channels.xml
+        run: |
+          echo "${{ matrix.list }}" > one-list.txt
+          node tools/make-guide-channels.mjs one-list.txt epg/sites custom.channels.xml
+          echo "PART=$(echo -n '${{ matrix.list }}' | md5sum | cut -c1-12)" >> "$GITHUB_ENV"
 
       - name: Collect the listings
         run: |
@@ -39,10 +59,36 @@ jobs:
           cd epg
           npm run grab --- --channels=../custom.channels.xml --output=../out/guide.xml --days=2 --maxConnections=5 --timeout=20000 || echo "Some listings sites didn't answer; carrying on with what we got."
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guide-part-${{ env.PART }}
+          path: out/guide.xml
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # Join the parts into one guide and publish it for the app.
+  publish:
+    needs: grab
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: guide-part-*
+          path: parts
+
+      - name: Merge the parts
+        run: node tools/merge-guides.mjs parts guide.xml
+
       - name: Publish the guide
         run: |
-          test -s out/guide.xml
-          gzip -9 -c out/guide.xml > guide.xml.gz
+          gzip -9 -c guide.xml > guide.xml.gz
           mkdir publish
           mv guide.xml.gz publish/
           cd publish

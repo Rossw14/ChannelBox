@@ -11,18 +11,19 @@ android {
         applicationId = "uk.co.channelbox"
         minSdk = 21
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4"
+        // On GitHub every build gets a higher number automatically, which is
+        // how the app knows an update is newer than what's installed.
+        val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+        versionCode = if (runNumber != null) 100 + runNumber else 5
+        versionName = if (runNumber != null) "1.5 (build $runNumber)" else "1.5"
 
-        // When built on GitHub, point the app at the TV guide that this
-        // project's "Update TV guide" job publishes on its "guide" branch.
+        // When built on GitHub, point the app at this project's TV guide (published
+        // by the "Update TV guide" job) and at its latest release (for updates).
         val repo = System.getenv("GITHUB_REPOSITORY").orEmpty()
-        val guideUrl = if (repo.isNotEmpty()) {
-            "https://raw.githubusercontent.com/$repo/guide/guide.xml.gz"
-        } else {
-            ""
-        }
+        val guideUrl = if (repo.isNotEmpty()) "https://raw.githubusercontent.com/$repo/guide/guide.xml.gz" else ""
+        val updateUrl = if (repo.isNotEmpty()) "https://github.com/$repo/releases/latest/download" else ""
         buildConfigField("String", "GUIDE_URL", "\"$guideUrl\"")
+        buildConfigField("String", "UPDATE_URL", "\"$updateUrl\"")
     }
 
     buildFeatures {
@@ -72,4 +73,5 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:$media3")
     implementation("androidx.media3:media3-ui:$media3")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.core:core:1.13.1")
 }

@@ -1,4 +1,12 @@
-# Playlists the daily TV guide job collects listings for.
-# One link per line. Add more lines if you turn on other lists in the app's Settings.
+# Playlists the twice-daily TV guide job collects listings for.
+# One link per line; each is collected separately, at the same time, then merged.
+# If you tick other countries in the app's Settings, add their list here too, e.g.
+#   https://iptv-org.github.io/iptv/countries/fr.m3u   (France)
+# Country codes: https://github.com/iptv-org/iptv/blob/master/PLAYLISTS.md
 https://iptv-org.github.io/iptv/countries/uk.m3u
 https://iptv-org.github.io/iptv/countries/ie.m3u
+https://iptv-org.github.io/iptv/countries/us.m3u
+https://iptv-org.github.io/iptv/countries/ca.m3u
+https://iptv-org.github.io/iptv/countries/au.m3u
+https://iptv-org.github.io/iptv/countries/nz.m3u
+https://iptv-org.github.io/iptv/countries/int.m3u

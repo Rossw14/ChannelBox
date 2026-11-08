@@ -96,7 +96,8 @@ On the Sony TV:
 
 The listings come from the free iptv-org guide tools. These don't publish a ready-made UK guide,
 so this project includes a job (`.github/workflows/guide.yml`) that GitHub runs twice a day.
-It collects about two days of listings for the channels in `guide-playlists.txt` and saves them to a
+It collects about two days of listings for every playlist in `guide-playlists.txt` (UK, Ireland, USA,
+Canada, Australia, New Zealand and International to start with), side by side, and saves them to a
 branch called `guide`.
 
 The TV can only download that file if the project is **public**: **Settings → General →
@@ -104,6 +105,14 @@ Danger Zone → Change visibility → Make public**. The project contains only t
 nothing personal is exposed.
 
 To run the guide job straight away instead of waiting, go to **Actions → Update TV guide → Run workflow**.
+
+## Updating the app
+
+Every time GitHub builds ChannelBox, the new version is published under **Releases** on your
+project page. On the TV, go to **Settings → Check for updates** and choose **Install**.
+The first time, Android asks you to allow ChannelBox to install apps: switch it on, press Back,
+and choose Check for updates again. ChannelBox also checks once a day and tells you when an
+update is waiting. You can also download `ChannelBox.apk` from the Releases page.
 
 ## Adding your own playlist later
 

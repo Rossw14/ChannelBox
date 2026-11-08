@@ -198,6 +198,19 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         loadedSettingsVersion = prefs.settingsVersion
         loadPlaylist(force = false)
+        checkForUpdateQuietly()
+    }
+
+    /** Once a day, see if a newer ChannelBox has been built and mention it. */
+    private fun checkForUpdateQuietly() {
+        if (!Updater.isAvailable) return
+        val now = System.currentTimeMillis()
+        if (now - prefs.lastUpdateCheck < 24L * 60 * 60 * 1000) return
+        prefs.lastUpdateCheck = now
+        checker.execute {
+            val newer = runCatching { Updater.checkForNewer() }.getOrNull()
+            if (newer != null) handler.post { if (!isDestroyed) toast(getString(R.string.update_ready_toast), long = true) }
+        }
     }
 
     override fun onStart() {
