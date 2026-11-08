@@ -1,0 +1,54 @@
+name: Update TV guide
+
+on:
+  schedule:
+    - cron: "23 3,15 * * *" # twice a day
+  workflow_dispatch:
+  push:
+    paths:
+      - guide-playlists.txt
+      - tools/make-guide-channels.mjs
+      - .github/workflows/guide.yml
+
+permissions:
+  contents: write
+
+jobs:
+  guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download the guide tools
+        run: |
+          git clone --depth 1 https://github.com/iptv-org/epg.git epg
+          cd epg
+          npm install --no-audit --no-fund
+
+      - name: Work out which channels need listings
+        run: node tools/make-guide-channels.mjs guide-playlists.txt epg/sites custom.channels.xml
+
+      - name: Collect the listings
+        run: |
+          mkdir -p out
+          cd epg
+          npm run grab --- --channels=../custom.channels.xml --output=../out/guide.xml --days=2 --maxConnections=5 --timeout=20000 || echo "Some listings sites didn't answer; carrying on with what we got."
+
+      - name: Publish the guide
+        run: |
+          test -s out/guide.xml
+          gzip -9 -c out/guide.xml > guide.xml.gz
+          mkdir publish
+          mv guide.xml.gz publish/
+          cd publish
+          git init -q -b guide
+          git config user.name "ChannelBox guide"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add guide.xml.gz
+          git commit -q -m "TV guide $(date -u '+%Y-%m-%d %H:%M')"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" guide
