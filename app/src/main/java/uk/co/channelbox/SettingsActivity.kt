@@ -27,6 +27,9 @@ class SettingsActivity : Activity() {
         val iptvOrg = findViewById<CheckBox>(R.id.iptv_org)
         iptvOrg.isChecked = prefs.iptvOrgEnabled
 
+        val freeTv = findViewById<CheckBox>(R.id.free_tv)
+        freeTv.isChecked = prefs.freeTvEnabled
+
         val allCountries = findViewById<CheckBox>(R.id.all_countries)
         allCountries.isChecked = prefs.allCountries
 
@@ -65,11 +68,12 @@ class SettingsActivity : Activity() {
         }
         fun updateCountryVisibility() {
             container.visibility =
-                if (iptvOrg.isChecked && !allCountries.isChecked) View.VISIBLE else View.GONE
-            allCountries.visibility = if (iptvOrg.isChecked) View.VISIBLE else View.GONE
+                if ((iptvOrg.isChecked || freeTv.isChecked) && !allCountries.isChecked) View.VISIBLE else View.GONE
+            allCountries.visibility = if (iptvOrg.isChecked || freeTv.isChecked) View.VISIBLE else View.GONE
         }
         updateCountryVisibility()
         iptvOrg.setOnCheckedChangeListener { _, _ -> updateCountryVisibility() }
+        freeTv.setOnCheckedChangeListener { _, _ -> updateCountryVisibility() }
         allCountries.setOnCheckedChangeListener { _, _ -> updateCountryVisibility() }
 
         val hideOffline = findViewById<CheckBox>(R.id.hide_offline)
@@ -96,15 +100,16 @@ class SettingsActivity : Activity() {
                 toast(getString(R.string.url_invalid))
                 return@setOnClickListener
             }
-            if (!iptvOrg.isChecked && url.isEmpty()) {
+            if (!iptvOrg.isChecked && !freeTv.isChecked && url.isEmpty()) {
                 toast(getString(R.string.need_a_source))
                 return@setOnClickListener
             }
-            if (iptvOrg.isChecked && !allCountries.isChecked && chosen.isEmpty()) {
+            if ((iptvOrg.isChecked || freeTv.isChecked) && !allCountries.isChecked && chosen.isEmpty()) {
                 toast(getString(R.string.need_a_country))
                 return@setOnClickListener
             }
             prefs.iptvOrgEnabled = iptvOrg.isChecked
+            prefs.freeTvEnabled = freeTv.isChecked
             prefs.allCountries = allCountries.isChecked
             if (chosen.isNotEmpty()) prefs.countries = chosen
             prefs.customUrl = url

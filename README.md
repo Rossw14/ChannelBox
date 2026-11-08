@@ -11,6 +11,9 @@ that in Settings. You can also add your own M3U playlist link.
 - A full-screen live player for HLS (`.m3u8`), DASH (`.mpd`) and plain stream links.
 - A side panel with **Favourites**, **Recently watched**, **Search** and your countries.
   Open a country to see its categories (News, Entertainment, Kids and so on).
+- **Extra free channels from the Free-TV project** (switchable in Settings): about 700 more channels and
+  hundreds of backup streams, including the BBC's own official feeds. Links that point at bare IP
+  addresses (re-broadcasts rather than the broadcaster's own service) are left out.
 - **Search** across every channel you've chosen, typed with the remote or the on-screen keyboard's mic.
 - Channel changing with ▲▼ or CH+/CH−, plus typed channel numbers.
 - Favourites: hold OK on a channel, or press the Menu button.
@@ -61,7 +64,7 @@ that in Settings. You can also add your own M3U playlist link.
 | ▲ from the top row, or 🔴 / 🟢 | Switch category (All, With listings, News, Movies…) |
 | CH+ / CH− | Page up / down |
 | Number keys | Jump to that channel |
-| OK | Watch that channel |
+| OK | Show that channel in the little picture; OK again to watch full screen |
 | Back or Guide | Close the guide |
 
 ## Getting the app onto your TV

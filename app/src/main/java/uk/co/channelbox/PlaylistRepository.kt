@@ -17,6 +17,11 @@ object PlaylistRepository {
     private const val BY_CATEGORY_URL = "$BASE/index.m3u"
     private const val BY_COUNTRY_URL = "$BASE/index.country.m3u"
 
+    /** The Free-TV project's list of channels broadcasters provide for free. */
+    private const val FREE_TV_URL = "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8"
+    private val BARE_IP_HOST = Regex("""^\d{1,3}(\.\d{1,3}){3}$""")
+    private val FREE_TV_MARKS = Regex("[ⒼⓈⓎ]")
+
     private const val CACHE_MAX_AGE_MS = 12L * 60 * 60 * 1000 // 12 hours
     private const val COUNTRIES_FILE = "countries.txt"
 
@@ -54,9 +59,57 @@ object PlaylistRepository {
             }
         }
 
+        if (prefs.freeTvEnabled) {
+            fetch(context, "freetv", FREE_TV_URL, "Free-TV list", forceRefresh, errors)?.let { text ->
+                for ((entry, country) in parseFreeTv(text)) {
+                    entries.add(entry)
+                    if (country != null) countryByUrl.getOrPut(entry.url) { LinkedHashSet() }.add(country)
+                }
+            }
+        }
+
         val channels = ChannelMerger.merge(entries, countryByUrl, customUrls)
         saveCountryList(context, channels)
         return LoadResult(channels, guideUrls.distinct(), errors)
+    }
+
+    /**
+     * Free-TV groups its list by country rather than category, marks channels
+     * with symbols (Ⓖ geo-blocked etc.) and includes some on-demand sections.
+     * Keep the live channels, skip links that point at a bare IP address
+     * (re-broadcasts rather than the broadcaster's own service), and work out
+     * each channel's country from its tvg-country code.
+     */
+    private fun parseFreeTv(text: String): List<Pair<PlaylistEntry, String?>> {
+        val result = ArrayList<Pair<PlaylistEntry, String?>>()
+        val countryCodes = HashMap<String, String>()
+        for (line in text.lineSequence()) {
+            if (!line.startsWith("#EXTINF")) continue
+            val code = Regex("""tvg-country="([^"]*)"""").find(line)?.groupValues?.get(1)
+            val name = line.substringAfterLast(',').trim()
+            if (code != null) countryCodes[name] = code
+        }
+        for (e in M3uParser.parse(text).entries) {
+            if (e.groups.any { it.startsWith("VOD", ignoreCase = true) }) continue
+            val host = try { java.net.URI(e.url).host.orEmpty() } catch (ex: Exception) { "" }
+            if (host.isEmpty() || BARE_IP_HOST.matches(host)) continue
+
+            val cleanName = FREE_TV_MARKS.replace(e.name, "").trim()
+            val country = countryCodes[e.name.trim()]?.let { countryName(it) }
+                ?: e.groups.firstOrNull()?.takeIf { it != M3uParser.OTHER }
+            val category = if (cleanName.contains("radio", ignoreCase = true)) "Radio" else "General"
+            result.add(Pair(e.copy(name = cleanName, groups = listOf(category)), country))
+        }
+        return result
+    }
+
+    /** "GB" -> "United Kingdom", matching how iptv-org names countries. */
+    private fun countryName(code: String): String? {
+        val upper = code.trim().uppercase()
+        if (upper.length != 2) return null
+        if (upper == "UK" || upper == "GB") return "United Kingdom"
+        val name = java.util.Locale("", upper).getDisplayCountry(java.util.Locale.ENGLISH)
+        return name.takeIf { it.isNotBlank() && !it.equals(upper, ignoreCase = true) }
     }
 
     /** Countries and how many channels each has, for the Settings screen. */

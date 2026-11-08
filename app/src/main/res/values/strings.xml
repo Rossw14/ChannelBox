@@ -38,7 +38,7 @@
     <string name="guide_not_set_up_long">The TV guide hasn\'t been set up for this copy of ChannelBox. See the README for the one-time GitHub step.</string>
     <string name="guide_failed_long">The TV guide couldn\'t be downloaded. If you\'ve only just set it up, the first guide can take up to an hour to appear. Choose Refresh to try again.</string>
     <string name="guide_no_info">No information</string>
-    <string name="guide_hint">OK: watch · ▲▼ channels · ◀▶ earlier / later · ▲ from the top or 🔴 🟢: categories · CH+/−: page · Back: close</string>
+    <string name="guide_hint">OK: show in the little picture (OK again: full screen) · ▲▼ channels · ◀▶ earlier / later · ▲ from the top or 🔴 🟢: categories · CH+/−: page · Back: close</string>
     <string name="guide_heading">TV GUIDE · %1$s</string>
     <string name="guide_channel_line">%1$d  %2$s</string>
     <string name="guide_no_listings">No listings for this channel</string>
@@ -94,6 +94,7 @@
 
     <string name="free_channels_heading">Free channels</string>
     <string name="iptv_org_enabled">Include free channels from iptv-org (about 10,000 worldwide)</string>
+    <string name="free_tv_enabled">Include the Free-TV list (broadcasters\' own free streams, e.g. official BBC feeds; adds about 700 channels and many backup streams)</string>
     <string name="countries_heading">Countries</string>
     <string name="countries_help">Pick the countries to show. Fewer countries means a tidier list and faster checking.</string>
     <string name="all_countries">Every country (all channels)</string>

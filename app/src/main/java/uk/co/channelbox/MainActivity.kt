@@ -225,8 +225,16 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 showGuideInfo(row, programme, slotStart)
 
             override fun onGuideSelect(row: Int, programme: Programme?) {
-                closeGuide()
-                playChannel(guideChannels, row)
+                val channel = guideChannels.getOrNull(row) ?: return
+                if (channel.id == currentChannel?.id) {
+                    // Already in the little picture: OK again goes full screen.
+                    closeGuide()
+                    showBanner(channel, null)
+                } else {
+                    // Like Sky: the first OK changes the little picture, and you stay in the guide.
+                    playChannel(guideChannels, row)
+                    epgGrid.playingId = channel.id
+                }
             }
 
             override fun onGuideTopEdge() {
@@ -902,6 +910,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         epgGrid.playingId = currentChannel?.id
         applyGuideCategory(0)
         epgGrid.requestFocus()
+        // Nothing on yet? Start the highlighted channel in the little picture.
+        if (currentChannel == null && guideChannels.isNotEmpty()) {
+            playChannel(guideChannels, epgGrid.focusRow)
+            epgGrid.playingId = currentChannel?.id
+        }
         handler.removeCallbacks(guideTick)
         handler.postDelayed(guideTick, 60_000L)
     }

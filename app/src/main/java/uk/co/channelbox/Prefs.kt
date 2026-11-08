@@ -11,6 +11,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_IPTV_ORG, true)
         set(value) = sp.edit().putBoolean(KEY_IPTV_ORG, value).apply()
 
+    /** Also load the Free-TV list (broadcasters' own free streams). */
+    var freeTvEnabled: Boolean
+        get() = sp.getBoolean(KEY_FREE_TV, true)
+        set(value) = sp.edit().putBoolean(KEY_FREE_TV, value).apply()
+
     /** Show every country rather than just the ones picked. */
     var allCountries: Boolean
         get() = sp.getBoolean(KEY_ALL_COUNTRIES, false)
@@ -60,6 +65,7 @@ class Prefs(context: Context) {
     companion object {
         private const val KEY_IPTV_ORG = "iptv_org"
         private const val KEY_ALL_COUNTRIES = "all_countries"
+        private const val KEY_FREE_TV = "free_tv"
         private const val KEY_COUNTRIES = "countries"
         private const val KEY_CUSTOM_URL = "custom_url"
         private const val KEY_FAVOURITES = "favourites"

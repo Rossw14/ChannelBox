@@ -92,6 +92,17 @@
             android:textColor="@color/white"
             android:textSize="18sp" />
 
+        <CheckBox
+            android:id="@+id/free_tv"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:background="@drawable/item_bg"
+            android:padding="12dp"
+            android:text="@string/free_tv_enabled"
+            android:textColor="@color/white"
+            android:textSize="18sp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
