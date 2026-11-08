@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="accent">#FF4C9BFF</color>
+    <color name="focus">#FF2F7BF0</color>
+    <color name="gold">#FFFFC94D</color>
+    <color name="warning">#FFFFB35C</color>
+    <color name="text_secondary">#FFB4BCC8</color>
+    <color name="panel_dark">#F20E1217</color>
+    <color name="panel_mid">#E6151B23</color>
+    <color name="row_active">#33FFFFFF</color>
+    <color name="button_idle">#26FFFFFF</color>
+    <color name="logo_bg">#FF2A313C</color>
+</resources>
