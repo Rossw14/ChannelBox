@@ -96,6 +96,40 @@ class SettingsActivity : Activity() {
         freeTv.setOnCheckedChangeListener { _, _ -> updateCountryVisibility() }
         allCountries.setOnCheckedChangeListener { _, _ -> updateCountryVisibility() }
 
+        // Apps tab: which installed apps to show
+        val appsTab = findViewById<CheckBox>(R.id.apps_tab)
+        appsTab.isChecked = prefs.appsTab
+        val appsContainer = findViewById<LinearLayout>(R.id.apps_container)
+        val appsHelp = findViewById<View>(R.id.apps_help)
+        val installed = AppsRepository.installedApps(this)
+        val chosenNow = AppsRepository.chosenApps(this, prefs).map { it.packageName }.toSet()
+        val appBoxes = ArrayList<Pair<String, CheckBox>>()
+        for (app in installed) {
+            val box = CheckBox(this).apply {
+                text = app.label
+                isChecked = app.packageName in chosenNow
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundResource(R.drawable.item_bg)
+                setPadding(padding, padding, padding, padding)
+                isFocusable = true
+            }
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+            params.bottomMargin = dp(4)
+            appsContainer.addView(box, params)
+            appBoxes.add(app.packageName to box)
+        }
+        fun updateAppsVisibility() {
+            val show = if (appsTab.isChecked) View.VISIBLE else View.GONE
+            appsContainer.visibility = show
+            appsHelp.visibility = show
+        }
+        updateAppsVisibility()
+        appsTab.setOnCheckedChangeListener { _, _ -> updateAppsVisibility() }
+
         val hideOffline = findViewById<CheckBox>(R.id.hide_offline)
         hideOffline.isChecked = prefs.hideOffline
 
@@ -152,6 +186,9 @@ class SettingsActivity : Activity() {
             prefs.customUrl = url
             prefs.customEnabled = customEnabled.isChecked
             prefs.hideOffline = hideOffline.isChecked
+            prefs.appsTab = appsTab.isChecked
+            val ticked = appBoxes.filter { it.second.isChecked }.map { it.first }.toSet()
+            if (ticked != chosenNow) prefs.chosenApps = ticked
             prefs.maxHeight = qualityOptions.firstOrNull { it.first == qualityGroup.checkedRadioButtonId }?.second ?: 0
             prefs.settingsVersion = prefs.settingsVersion + 1
             toast(getString(R.string.saved))

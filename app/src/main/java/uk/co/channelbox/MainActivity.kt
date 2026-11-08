@@ -36,6 +36,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.util.Date
@@ -67,6 +68,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var guideTabs: LinearLayout
     private lateinit var guideTabsScroll: HorizontalScrollView
     private lateinit var guideSearch: EditText
+    private lateinit var appsGrid: RecyclerView
+    private lateinit var appsAdapter: AppsAdapter
     private lateinit var trickBar: View
     private lateinit var trickIcon: TextView
     private lateinit var trickText: TextView
@@ -180,6 +183,32 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         guideTabs = findViewById(R.id.guide_tabs)
         guideTabsScroll = findViewById(R.id.guide_tabs_scroll)
         guideSearch = findViewById(R.id.guide_search)
+        appsGrid = findViewById(R.id.apps_grid)
+        appsAdapter = AppsAdapter(object : AppsAdapter.Listener {
+            override fun onAppClick(app: TvApp) {
+                if (app.packageName == AppsRepository.SEARCH_TILE) {
+                    if (!AppsRepository.searchFilmsAndShows(this@MainActivity, "")) toast(getString(R.string.search_unavailable))
+                    return
+                }
+                if (!AppsRepository.launch(this@MainActivity, app)) {
+                    toast(getString(R.string.app_wont_open, app.label))
+                }
+            }
+
+            override fun onAppFocused(app: TvApp) {
+                guideChannel.text = ""
+                guideTitle.text = app.label
+                guideTime.setText(R.string.apps_open)
+                guideDesc.setText(
+                    if (app.packageName == AppsRepository.SEARCH_TILE) R.string.search_tile_desc else R.string.apps_desc
+                )
+            }
+        })
+        appsGrid.layoutManager = GridLayoutManager(this, APP_COLUMNS)
+        appsGrid.adapter = appsAdapter
+        appsGrid.itemAnimator = null
+        // Somewhere to "park" focus while the menu row is in use.
+        guideTabsScroll.isFocusable = true
         guideSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -903,7 +932,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
     }
 
-    private enum class TabKind { FAVOURITES, ALL, RECENT, SEARCH, LISTED, CATEGORY, SETTINGS }
+    private enum class TabKind { FAVOURITES, ALL, RECENT, SEARCH, APPS, LISTED, CATEGORY, SETTINGS }
 
     private class GuideTab(val kind: TabKind, val label: String, val channels: List<Channel>) {
         val key: String get() = "$kind:$label"
@@ -1012,6 +1041,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         tabs.add(GuideTab(TabKind.SEARCH, getString(R.string.guide_tab_search), searchIn(base, guideSearchQuery)))
         val recent = prefs.recent.mapNotNull { byId[it] }
         if (recent.isNotEmpty()) tabs.add(GuideTab(TabKind.RECENT, getString(R.string.guide_tab_recent), recent))
+        if (prefs.appsTab) tabs.add(GuideTab(TabKind.APPS, getString(R.string.guide_tab_apps), emptyList()))
         tabs.add(GuideTab(TabKind.ALL, getString(R.string.guide_tab_all), base))
         val listed = base.filter { guide.programmes(it).isNotEmpty() }
         if (listed.isNotEmpty() && listed.size < base.size) {
@@ -1034,7 +1064,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         val padV = (6 * resources.displayMetrics.density).toInt()
         for (tab in tabs) {
             val view = TextView(this)
-            val showCount = tab.kind != TabKind.SEARCH && tab.kind != TabKind.SETTINGS
+            val showCount = tab.kind != TabKind.SEARCH && tab.kind != TabKind.SETTINGS && tab.kind != TabKind.APPS
             view.text = if (showCount) "${tab.label}  ${tab.channels.size}" else tab.label
             view.setTextColor(0xFFFFFFFF.toInt())
             view.textSize = 15f
@@ -1061,6 +1091,20 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         guideChannels = tab.channels
         guideHeading.text = getString(R.string.guide_heading, tab.label)
         guideSearch.visibility = if (tab.kind == TabKind.SEARCH) View.VISIBLE else View.GONE
+        if (tab.kind == TabKind.APPS) {
+            epgGrid.visibility = View.GONE
+            appsGrid.visibility = View.VISIBLE
+            val searchTile = TvApp(AppsRepository.SEARCH_TILE, getString(R.string.search_tile))
+            appsAdapter.submit(listOf(searchTile) + AppsRepository.chosenApps(this, prefs))
+            guideChannel.text = ""
+            guideTime.text = ""
+            guideTitle.setText(R.string.apps_title)
+            guideDesc.setText(if (appsAdapter.items.isEmpty()) R.string.apps_none else R.string.apps_desc)
+            updateGuideTabs()
+            return
+        }
+        appsGrid.visibility = View.GONE
+        epgGrid.visibility = View.VISIBLE
         val startRow = guideChannels.indexOfFirst { it.id == focusId }.coerceAtLeast(0)
         epgGrid.setData(guideChannels, guide, startRow)
         if (guideChannels.isEmpty()) showEmptyGuideInfo(tab)
@@ -1109,6 +1153,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     private fun setGuideTabsFocused(focused: Boolean) {
         guideTabsFocused = focused
+        if (focused) guideTabsScroll.requestFocus()
         updateGuideTabs()
     }
 
@@ -1131,6 +1176,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 setGuideTabsFocused(false)
                 guideSearch.requestFocus()
                 showKeyboard(guideSearch)
+            }
+            TabKind.APPS -> {
+                setGuideTabsFocused(false)
+                appsGrid.scrollToPosition(0)
+                requestFocusAt(appsGrid, 0, 0)
             }
             else -> if (guideChannels.isNotEmpty()) {
                 setGuideTabsFocused(false)
@@ -1529,6 +1579,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                         setGuideTabsFocused(true)
                         return true
                     }
+                    KeyEvent.KEYCODE_PROG_BLUE -> {
+                        if (guideSearchQuery.isNotBlank()) {
+                            hideKeyboard(guideSearch)
+                            if (!AppsRepository.searchFilmsAndShows(this, guideSearchQuery)) toast(getString(R.string.search_unavailable))
+                        }
+                        return true
+                    }
                 }
                 return super.dispatchKeyEvent(event)
             }
@@ -1544,12 +1601,29 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 }
                 return true
             }
+            val appRow = currentFocus?.let { appsGrid.findContainingItemView(it) }
+            if (appRow != null) {
+                val pos = appsGrid.getChildAdapterPosition(appRow)
+                when {
+                    code == KeyEvent.KEYCODE_DPAD_UP && pos < APP_COLUMNS -> setGuideTabsFocused(true)
+                    code == KeyEvent.KEYCODE_PROG_RED -> applyGuideCategory(guideCategoryIndex - 1)
+                    code == KeyEvent.KEYCODE_PROG_GREEN -> applyGuideCategory(guideCategoryIndex + 1)
+                    code == KeyEvent.KEYCODE_GUIDE -> leaveGuide()
+                    else -> return super.dispatchKeyEvent(event)
+                }
+                return true
+            }
             when (code) {
                 KeyEvent.KEYCODE_PROG_RED -> applyGuideCategory(guideCategoryIndex - 1)
                 KeyEvent.KEYCODE_PROG_GREEN -> applyGuideCategory(guideCategoryIndex + 1)
                 KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_MENU ->
                     guideChannels.getOrNull(epgGrid.focusRow)?.let { toggleFavourite(it) }
                 KeyEvent.KEYCODE_PROG_BLUE -> {
+                    // In Search with something typed: look for it in Netflix, Prime and co.
+                    if (currentGuideTab()?.kind == TabKind.SEARCH && guideSearchQuery.isNotBlank()) {
+                        if (!AppsRepository.searchFilmsAndShows(this, guideSearchQuery)) toast(getString(R.string.search_unavailable))
+                        return true
+                    }
                     val search = guideCategories.indexOfFirst { it.kind == TabKind.SEARCH }
                     if (search >= 0) {
                         applyGuideCategory(search)
@@ -1781,6 +1855,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         /** Rows jumped by CH+/CH- while the channel list is open. */
         private const val PAGE_SIZE = 8
         private const val GENERAL = "General"
+        private const val APP_COLUMNS = 5
 
         private const val STALL_TIMEOUT_MS = 10_000L
         private const val SEEK_STEP_MS = 15_000L

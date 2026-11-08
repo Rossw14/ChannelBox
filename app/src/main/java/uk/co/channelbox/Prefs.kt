@@ -58,6 +58,19 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_LAST_UPDATE_CHECK, 0L)
         set(value) = sp.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply()
 
+    /** Show the Apps tab (Netflix, Prime Video…) in the menu row. */
+    var appsTab: Boolean
+        get() = sp.getBoolean(KEY_APPS_TAB, true)
+        set(value) = sp.edit().putBoolean(KEY_APPS_TAB, value).apply()
+
+    /** Apps chosen in Settings, or null to pick the usual streaming apps automatically. */
+    var chosenApps: Set<String>?
+        get() = sp.getStringSet(KEY_CHOSEN_APPS, null)?.toSet()
+        set(value) {
+            if (value == null) sp.edit().remove(KEY_CHOSEN_APPS).apply()
+            else sp.edit().putStringSet(KEY_CHOSEN_APPS, HashSet(value)).apply()
+        }
+
     var hideOffline: Boolean
         get() = sp.getBoolean(KEY_HIDE_OFFLINE, true)
         set(value) = sp.edit().putBoolean(KEY_HIDE_OFFLINE, value).apply()
@@ -78,6 +91,8 @@ class Prefs(context: Context) {
         private const val KEY_RECENT = "recent"
         private const val KEY_LAST_CHANNEL = "last_channel"
         private const val KEY_HIDE_OFFLINE = "hide_offline"
+        private const val KEY_APPS_TAB = "apps_tab"
+        private const val KEY_CHOSEN_APPS = "chosen_apps"
         private const val KEY_MAX_HEIGHT = "max_height"
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
         private const val KEY_VERSION = "settings_version"

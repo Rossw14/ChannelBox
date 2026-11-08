@@ -109,14 +109,27 @@
             android:textSize="17sp"
             android:visibility="gone" />
 
-        <uk.co.channelbox.EpgGridView
-            android:id="@+id/epg_grid"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginStart="48dp"
             android:layout_marginTop="6dp"
             android:layout_marginEnd="48dp"
-            android:layout_weight="1" />
+            android:layout_weight="1">
+
+            <uk.co.channelbox.EpgGridView
+                android:id="@+id/epg_grid"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- Apps tab: Netflix, Prime Video and other installed apps -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/apps_grid"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <TextView
             android:layout_width="match_parent"

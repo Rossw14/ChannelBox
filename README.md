@@ -13,6 +13,9 @@ that in Settings. You can also add your own M3U playlist link.
   (⚙ Settings, ★ Favourites, 🔍 Search and 🕘 Recently watched first, then All channels, With listings and
   each category). Back from the channels jumps up to that menu row, every channel from your ticked countries A to Z underneath with what's on, and the live
   picture carrying on in the top-right corner.
+- **Apps tab** with tiles for Netflix, Prime Video, Disney+, YouTube, iPlayer, ITVX and your other apps
+  (choose which in Settings), plus **Search films & shows**, which hands your search to Google TV so
+  results play in the right app. In the Search tab, type a title and press 🔵 to do the same.
 - **Search** across every channel you've chosen, typed with the remote or the on-screen keyboard's mic.
 - Channel changing with ▲▼ or CH+/CH−, plus typed channel numbers.
 - Favourites: hold OK on a channel, or press the Menu button.

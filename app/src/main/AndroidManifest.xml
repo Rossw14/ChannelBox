@@ -5,6 +5,18 @@
     <!-- Lets the "Check for updates" button install new versions of ChannelBox. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Lets the Apps tab see which apps are installed (Netflix, Prime Video…). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <!-- Runs on Android TV / Google TV, but doesn't insist on it. -->
     <uses-feature
         android:name="android.software.leanback"
