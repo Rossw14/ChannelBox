@@ -66,6 +66,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var guideDesc: TextView
     private lateinit var guideTabs: LinearLayout
     private lateinit var guideTabsScroll: HorizontalScrollView
+    private lateinit var guideSearch: EditText
     private lateinit var trickBar: View
     private lateinit var trickIcon: TextView
     private lateinit var trickText: TextView
@@ -106,7 +107,9 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var guideOpen = false
     private var guideChannels: List<Channel> = emptyList()
     private var guideListName = ""
-    private var guideCategories: List<Pair<String, List<Channel>>> = emptyList()
+    private var guideCategories: List<GuideTab> = emptyList()
+    private var lastGuideTabKey: String? = null
+    private var guideSearchQuery = ""
     private var guideCategoryIndex = 0
     private var guideTabsFocused = false
 
@@ -139,6 +142,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private val commitDigits = Runnable { jumpToNumber() }
     private val searchRunnable = Runnable { runSearch() }
     private val stallCheck = Runnable { onStalled() }
+    private val guideSearchRunnable = Runnable { runGuideSearch() }
     private val trickUpdater = object : Runnable {
         override fun run() {
             updateTrickBar()
@@ -175,6 +179,25 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         guideDesc = findViewById(R.id.guide_desc)
         guideTabs = findViewById(R.id.guide_tabs)
         guideTabsScroll = findViewById(R.id.guide_tabs_scroll)
+        guideSearch = findViewById(R.id.guide_search)
+        guideSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                guideSearchQuery = s?.toString().orEmpty()
+                handler.removeCallbacks(guideSearchRunnable)
+                handler.postDelayed(guideSearchRunnable, 300L)
+            }
+        })
+        guideSearch.setOnEditorActionListener { _, _, _ ->
+            hideKeyboard(guideSearch)
+            runGuideSearch()
+            if (guideChannels.isNotEmpty()) {
+                setGuideTabsFocused(false)
+                epgGrid.requestFocus()
+            }
+            true
+        }
         trickBar = findViewById(R.id.trick_bar)
         trickIcon = findViewById(R.id.trick_icon)
         trickText = findViewById(R.id.trick_text)
@@ -238,7 +261,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             }
 
             override fun onGuideTopEdge() {
-                if (guideCategories.size > 1) setGuideTabsFocused(true)
+                if (currentGuideTab()?.kind == TabKind.SEARCH) {
+                    guideSearch.requestFocus()
+                } else {
+                    setGuideTabsFocused(true)
+                }
             }
         }
         findViewById<View>(R.id.guide_button).setOnClickListener { openGuide() }
@@ -370,7 +397,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             // but point at the updated version of the channel.
             val playingId = currentChannel?.id
             allChannels.firstOrNull { it.id == playingId }?.let { currentChannel = it }
-            if (overlay.visibility == View.VISIBLE) showOverlay()
+            if (guideOpen) rebuildGuideTabs(keepPosition = true)
         }
         startHealthCheck()
     }
@@ -384,7 +411,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
         updateStatusText()
         channelAdapter.notifyDataSetChanged()
-        if (guideOpen) epgGrid.updateGuide(guide)
+        if (guideOpen) rebuildGuideTabs(keepPosition = true)
         if (banner.visibility == View.VISIBLE) currentChannel?.let { showBanner(it, null) }
     }
 
@@ -563,9 +590,14 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         imm.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT)
     }
 
-    private fun hideKeyboard() {
+    private fun hideKeyboard(field: View = searchBox) {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(searchBox.windowToken, 0)
+        imm.hideSoftInputFromWindow(field.windowToken, 0)
+    }
+
+    private fun showKeyboard(field: View) {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
     }
 
     /** Rebuild the lists while keeping the highlighted row where it was. */
@@ -576,6 +608,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         val focusedId = channelRow?.let { visibleChannels.getOrNull(channelList.getChildAdapterPosition(it))?.id }
 
         rebuildGroups(keepSelection = true)
+        if (guideOpen) rebuildGuideTabs(keepPosition = true)
         if (overlay.visibility != View.VISIBLE) return
         when {
             channelRow != null -> {
@@ -851,16 +884,9 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         handler.postDelayed(hideBanner, if (status == null) 5_000L else 8_000L)
     }
 
+    /** The channel picker is now the guide-style page. */
     private fun showOverlay() {
-        if (guideOpen) closeGuide()
-        overlay.visibility = View.VISIBLE
-        banner.visibility = View.GONE
-        if (visibleChannels.isEmpty()) {
-            focusGroup(currentGroupIndex)
-        } else {
-            val playingPos = visibleChannels.indexOfFirst { it.id == currentChannel?.id }
-            focusChannel(if (playingPos >= 0) playingPos else 0)
-        }
+        openGuide()
     }
 
     private fun hideOverlay() {
@@ -877,52 +903,54 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
     }
 
-    /** Opens the full-screen guide for the list chosen on the left (e.g. UK channels). */
+    private enum class TabKind { FAVOURITES, ALL, RECENT, SEARCH, LISTED, CATEGORY, SETTINGS }
+
+    private class GuideTab(val kind: TabKind, val label: String, val channels: List<Channel>) {
+        val key: String get() = "$kind:$label"
+    }
+
+    private fun currentGuideTab(): GuideTab? = guideCategories.getOrNull(guideCategoryIndex)
+
+    /**
+     * Opens the guide-style channel picker: tabs across the top (Favourites
+     * first), and every channel from your ticked countries A to Z underneath.
+     */
     private fun openGuide() {
-        val group = groups.getOrNull(currentGroupIndex)
-        val base = if (visibleChannels.isNotEmpty()) visibleChannels else shownChannels()
-        if (base.isEmpty()) {
-            toast(getString(R.string.guide_empty))
-            return
+        if (!guideOpen) {
+            guideOpen = true
+            overlay.visibility = View.GONE
+            banner.visibility = View.GONE
+            guideScreen.visibility = View.VISIBLE
+
+            // Shrink the live picture into the top-right corner.
+            val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
+            params.width = resources.getDimensionPixelSize(R.dimen.guide_preview_width)
+            params.height = resources.getDimensionPixelSize(R.dimen.guide_preview_height)
+            params.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+            params.topMargin = resources.getDimensionPixelSize(R.dimen.guide_preview_top)
+            params.marginEnd = resources.getDimensionPixelSize(R.dimen.guide_preview_end)
+            playerView.layoutParams = params
+
+            handler.removeCallbacks(guideTick)
+            handler.postDelayed(guideTick, 60_000L)
         }
-        guideListName = when {
-            group == null -> getString(R.string.all_channels)
-            group.kind == Group.Kind.BACK -> browseCountry.orEmpty()
-            else -> group.label
-        }
-        buildGuideCategories(base)
-        guideTabsFocused = false
-
-        guideOpen = true
-        overlay.visibility = View.GONE
-        banner.visibility = View.GONE
-        guideScreen.visibility = View.VISIBLE
-
-        // Shrink the live picture into the top-right corner.
-        val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
-        params.width = resources.getDimensionPixelSize(R.dimen.guide_preview_width)
-        params.height = resources.getDimensionPixelSize(R.dimen.guide_preview_height)
-        params.gravity = android.view.Gravity.TOP or android.view.Gravity.END
-        params.topMargin = resources.getDimensionPixelSize(R.dimen.guide_preview_top)
-        params.marginEnd = resources.getDimensionPixelSize(R.dimen.guide_preview_end)
-        playerView.layoutParams = params
-
         epgGrid.playingId = currentChannel?.id
-        applyGuideCategory(0)
+        rebuildGuideTabs(keepPosition = false)
+        setGuideTabsFocused(false)
         epgGrid.requestFocus()
+
         // Nothing on yet? Start the highlighted channel in the little picture.
         if (currentChannel == null && guideChannels.isNotEmpty()) {
             playChannel(guideChannels, epgGrid.focusRow)
             epgGrid.playingId = currentChannel?.id
         }
-        handler.removeCallbacks(guideTick)
-        handler.postDelayed(guideTick, 60_000L)
     }
 
     private fun closeGuide() {
         if (!guideOpen) return
         guideOpen = false
         handler.removeCallbacks(guideTick)
+        hideKeyboard(guideSearch)
         guideScreen.visibility = View.GONE
         val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
         params.width = ViewGroup.LayoutParams.MATCH_PARENT
@@ -932,53 +960,119 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         playerView.layoutParams = params
     }
 
-    /** "All", "With listings", then the categories in this list (biggest first). */
-    private fun buildGuideCategories(base: List<Channel>) {
-        val cats = ArrayList<Pair<String, List<Channel>>>()
-        cats.add(Pair(getString(R.string.guide_tab_all), base))
+    /** All the channels the picker can show: your ticked countries, A to Z. */
+    private fun guideBaseChannels(): List<Channel> =
+        shownChannels().sortedWith(compareBy<Channel>({ it.name.lowercase().removePrefix("the ") }, { it.name }))
+
+    private fun searchIn(from: List<Channel>, query: String): List<Channel> {
+        val words = query.lowercase().split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        return from.asSequence()
+            .filter { ch -> words.all { ch.searchText.contains(it) } }
+            .sortedBy { if (it.name.lowercase().startsWith(words[0])) 0 else 1 }
+            .take(300)
+            .toList()
+    }
+
+    /**
+     * Tabs: ★ Favourites, All channels, Recently watched, Search, With listings,
+     * then categories (biggest first), then Settings.
+     */
+    private fun rebuildGuideTabs(keepPosition: Boolean) {
+        val previousKey = currentGuideTab()?.key ?: lastGuideTabKey
+        val focusedId = if (keepPosition) guideChannels.getOrNull(epgGrid.focusRow)?.id else currentChannel?.id
+        val base = guideBaseChannels()
+        val byId = base.associateBy { it.id }
+
+        val tabs = ArrayList<GuideTab>()
+        val favs = base.filter { isFavourite(it) }
+        if (favs.isNotEmpty()) tabs.add(GuideTab(TabKind.FAVOURITES, getString(R.string.guide_tab_favourites), favs))
+        tabs.add(GuideTab(TabKind.ALL, getString(R.string.guide_tab_all), base))
+        val recent = prefs.recent.mapNotNull { byId[it] }
+        if (recent.isNotEmpty()) tabs.add(GuideTab(TabKind.RECENT, getString(R.string.guide_tab_recent), recent))
+        tabs.add(GuideTab(TabKind.SEARCH, getString(R.string.guide_tab_search), searchIn(base, guideSearchQuery)))
         val listed = base.filter { guide.programmes(it).isNotEmpty() }
-        if (listed.isNotEmpty() && listed.size < base.size) cats.add(Pair(getString(R.string.guide_tab_listed), listed))
+        if (listed.isNotEmpty() && listed.size < base.size) {
+            tabs.add(GuideTab(TabKind.LISTED, getString(R.string.guide_tab_listed), listed))
+        }
         val byCategory = LinkedHashMap<String, MutableList<Channel>>()
         for (ch in base) for (g in ch.groups) byCategory.getOrPut(g) { ArrayList() }.add(ch)
-        if (byCategory.size > 1) {
-            byCategory.entries
-                .sortedWith(compareBy<Map.Entry<String, MutableList<Channel>>>({ it.key == M3uParser.OTHER }, { -it.value.size }))
-                .forEach { cats.add(Pair(it.key, it.value)) }
-        }
-        guideCategories = cats
+        byCategory.entries
+            .sortedWith(compareBy<Map.Entry<String, MutableList<Channel>>>({ it.key == M3uParser.OTHER }, { -it.value.size }))
+            .forEach { tabs.add(GuideTab(TabKind.CATEGORY, it.key, it.value)) }
+        tabs.add(GuideTab(TabKind.SETTINGS, getString(R.string.guide_tab_settings), emptyList()))
+        guideCategories = tabs
 
         guideTabs.removeAllViews()
         val padH = (14 * resources.displayMetrics.density).toInt()
         val padV = (6 * resources.displayMetrics.density).toInt()
-        for ((name, list) in cats) {
-            val tab = TextView(this)
-            tab.text = "$name  ${list.size}"
-            tab.setTextColor(0xFFFFFFFF.toInt())
-            tab.textSize = 15f
-            tab.setPadding(padH, padV, padH, padV)
-            tab.setBackgroundResource(R.drawable.tab_bg)
+        for (tab in tabs) {
+            val view = TextView(this)
+            val showCount = tab.kind != TabKind.SEARCH && tab.kind != TabKind.SETTINGS
+            view.text = if (showCount) "${tab.label}  ${tab.channels.size}" else tab.label
+            view.setTextColor(0xFFFFFFFF.toInt())
+            view.textSize = 15f
+            view.setPadding(padH, padV, padH, padV)
+            view.setBackgroundResource(R.drawable.tab_bg)
             val params = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             )
             params.marginEnd = padV
-            guideTabs.addView(tab, params)
+            guideTabs.addView(view, params)
         }
-        guideTabsScroll.visibility = if (cats.size > 1) View.VISIBLE else View.GONE
+
+        val index = tabs.indexOfFirst { it.key == previousKey }.takeIf { it >= 0 } ?: 0
+        applyGuideCategory(index, focusedId)
     }
 
-    private fun applyGuideCategory(index: Int) {
+    private fun applyGuideCategory(index: Int, focusId: String? = currentChannel?.id) {
         if (guideCategories.isEmpty()) return
         guideCategoryIndex = index.mod(guideCategories.size)
-        val (name, list) = guideCategories[guideCategoryIndex]
-        guideChannels = list
-        guideHeading.text = if (guideCategoryIndex == 0) {
-            getString(R.string.guide_heading, guideListName)
-        } else {
-            getString(R.string.guide_heading_category, guideListName, name)
-        }
-        val startRow = list.indexOfFirst { it.id == currentChannel?.id }.coerceAtLeast(0)
-        epgGrid.setData(list, guide, startRow)
+        val tab = guideCategories[guideCategoryIndex]
+        lastGuideTabKey = tab.key
+        guideChannels = tab.channels
+        guideHeading.text = getString(R.string.guide_heading, tab.label)
+        guideSearch.visibility = if (tab.kind == TabKind.SEARCH) View.VISIBLE else View.GONE
+        val startRow = guideChannels.indexOfFirst { it.id == focusId }.coerceAtLeast(0)
+        epgGrid.setData(guideChannels, guide, startRow)
+        if (guideChannels.isEmpty()) showEmptyGuideInfo(tab)
         updateGuideTabs()
+    }
+
+    private fun showEmptyGuideInfo(tab: GuideTab) {
+        guideChannel.text = ""
+        guideTime.text = ""
+        when (tab.kind) {
+            TabKind.SETTINGS -> {
+                guideTitle.setText(R.string.guide_settings_title)
+                guideDesc.setText(R.string.guide_settings_desc)
+            }
+            TabKind.SEARCH -> {
+                guideTitle.text = if (guideSearchQuery.isBlank()) {
+                    getString(R.string.guide_search_title)
+                } else {
+                    getString(R.string.search_none, guideSearchQuery)
+                }
+                guideDesc.setText(R.string.guide_search_desc)
+            }
+            else -> {
+                guideTitle.setText(if (loading) R.string.loading_channels else R.string.nothing_here)
+                guideDesc.text = if (allChannels.isEmpty() && !loading) getString(R.string.no_channels) else ""
+            }
+        }
+    }
+
+    private fun runGuideSearch() {
+        val index = guideCategories.indexOfFirst { it.kind == TabKind.SEARCH }
+        if (index < 0) return
+        val updated = guideCategories.toMutableList()
+        updated[index] = GuideTab(TabKind.SEARCH, guideCategories[index].label, searchIn(guideBaseChannels(), guideSearchQuery))
+        guideCategories = updated
+        if (guideCategoryIndex == index) {
+            guideChannels = updated[index].channels
+            epgGrid.setData(guideChannels, guide, 0)
+            if (guideChannels.isEmpty()) showEmptyGuideInfo(updated[index])
+        }
     }
 
     private fun setGuideTabsFocused(focused: Boolean) {
@@ -994,6 +1088,22 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
         guideTabs.getChildAt(guideCategoryIndex)?.let { tab ->
             guideTabsScroll.post { guideTabsScroll.smoothScrollTo((tab.left - tab.width).coerceAtLeast(0), 0) }
+        }
+    }
+
+    /** OK (or ▼) on a tab. */
+    private fun enterGuideTab(viaOk: Boolean) {
+        when (currentGuideTab()?.kind) {
+            TabKind.SETTINGS -> if (viaOk) startActivity(Intent(this, SettingsActivity::class.java))
+            TabKind.SEARCH -> {
+                setGuideTabsFocused(false)
+                guideSearch.requestFocus()
+                showKeyboard(guideSearch)
+            }
+            else -> if (guideChannels.isNotEmpty()) {
+                setGuideTabsFocused(false)
+                epgGrid.requestFocus()
+            }
         }
     }
 
@@ -1220,10 +1330,23 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             .show()
     }
 
-    /** Close the guide; if nothing is playing yet, go back to the channel list. */
+    /** Close the guide back to the picture; with nothing playing, Back twice exits. */
     private fun leaveGuide() {
+        if (currentChannel == null) {
+            confirmExit()
+            return
+        }
         closeGuide()
-        if (currentChannel == null) showOverlay()
+    }
+
+    private fun confirmExit() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastBackPress < 2_000) {
+            finish()
+            return
+        }
+        lastBackPress = now
+        toast(getString(R.string.press_back_again))
     }
 
     private fun showGuideInfo(row: Int, programme: Programme?, slotStart: Long) {
@@ -1360,14 +1483,29 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
 
         if (guideOpen) {
+            if (currentFocus === guideSearch) {
+                // Typing a search: arrows leave the box, everything else types.
+                when (code) {
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        hideKeyboard(guideSearch)
+                        if (guideChannels.isNotEmpty()) epgGrid.requestFocus()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        hideKeyboard(guideSearch)
+                        epgGrid.requestFocus()
+                        setGuideTabsFocused(true)
+                        return true
+                    }
+                }
+                return super.dispatchKeyEvent(event)
+            }
             if (guideTabsFocused) {
                 when (code) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> applyGuideCategory(guideCategoryIndex - 1)
                     KeyEvent.KEYCODE_DPAD_RIGHT -> applyGuideCategory(guideCategoryIndex + 1)
-                    KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                        setGuideTabsFocused(false)
-                        epgGrid.requestFocus()
-                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> enterGuideTab(viaOk = false)
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> enterGuideTab(viaOk = true)
                     KeyEvent.KEYCODE_DPAD_UP -> Unit
                     KeyEvent.KEYCODE_GUIDE -> leaveGuide()
                     else -> return super.dispatchKeyEvent(event)
@@ -1375,8 +1513,17 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 return true
             }
             when (code) {
-                KeyEvent.KEYCODE_PROG_RED, KeyEvent.KEYCODE_PROG_YELLOW -> applyGuideCategory(guideCategoryIndex - 1)
-                KeyEvent.KEYCODE_PROG_GREEN, KeyEvent.KEYCODE_PROG_BLUE -> applyGuideCategory(guideCategoryIndex + 1)
+                KeyEvent.KEYCODE_PROG_RED -> applyGuideCategory(guideCategoryIndex - 1)
+                KeyEvent.KEYCODE_PROG_GREEN -> applyGuideCategory(guideCategoryIndex + 1)
+                KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_MENU ->
+                    guideChannels.getOrNull(epgGrid.focusRow)?.let { toggleFavourite(it) }
+                KeyEvent.KEYCODE_PROG_BLUE -> {
+                    val search = guideCategories.indexOfFirst { it.kind == TabKind.SEARCH }
+                    if (search >= 0) {
+                        applyGuideCategory(search)
+                        enterGuideTab(viaOk = true)
+                    }
+                }
                 KeyEvent.KEYCODE_GUIDE -> leaveGuide()
                 KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> epgGrid.page(-1)
                 KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> epgGrid.page(1)

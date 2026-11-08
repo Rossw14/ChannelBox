@@ -90,6 +90,25 @@
                 android:orientation="horizontal" />
         </HorizontalScrollView>
 
+        <EditText
+            android:id="@+id/guide_search"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="48dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginEnd="48dp"
+            android:background="@drawable/field_bg"
+            android:hint="@string/search_hint"
+            android:imeOptions="actionSearch|flagNoExtractUi"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:padding="10dp"
+            android:singleLine="true"
+            android:textColor="@color/white"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="17sp"
+            android:visibility="gone" />
+
         <uk.co.channelbox.EpgGridView
             android:id="@+id/epg_grid"
             android:layout_width="match_parent"

@@ -120,6 +120,12 @@ class SettingsActivity : Activity() {
             finish()
         }
         findViewById<View>(R.id.cancel_button).setOnClickListener { finish() }
+        findViewById<View>(R.id.refresh_button).setOnClickListener {
+            // Bumping the version makes the main screen re-download everything.
+            prefs.settingsVersion = prefs.settingsVersion + 1
+            toast(getString(R.string.saved))
+            finish()
+        }
 
         setUpUpdates()
         iptvOrg.requestFocus()

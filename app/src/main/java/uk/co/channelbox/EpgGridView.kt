@@ -128,11 +128,11 @@ class EpgGridView @JvmOverloads constructor(
     }
 
     private fun moveRow(delta: Int) {
-        if (channels.isEmpty()) return
-        if (delta < 0 && focusRow == 0) {
+        if (delta < 0 && (channels.isEmpty() || focusRow == 0)) {
             listener?.onGuideTopEdge()
             return
         }
+        if (channels.isEmpty()) return
         val target = (focusRow + delta).coerceIn(0, channels.size - 1)
         if (target == focusRow) return
         focusRow = target

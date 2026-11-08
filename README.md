@@ -9,11 +9,10 @@ that in Settings. You can also add your own M3U playlist link.
 ## What it does
 
 - A full-screen live player for HLS (`.m3u8`), DASH (`.mpd`) and plain stream links.
-- A side panel with **Favourites**, **Recently watched**, **Search** and your countries.
-  Open a country to see its categories (News, Entertainment, Kids and so on).
-- **Extra free channels from the Free-TV project** (switchable in Settings): about 700 more channels and
-  hundreds of backup streams, including the BBC's own official feeds. Links that point at bare IP
-  addresses (re-broadcasts rather than the broadcaster's own service) are left out.
+- **A Sky-style channel picker.** Press OK while watching to open the guide page: tabs across the top
+  (★ Favourites first, then All channels, Recently watched, Search, With listings, each category, and
+  Settings), every channel from your ticked countries A to Z underneath with what's on, and the live
+  picture carrying on in the top-right corner.
 - **Search** across every channel you've chosen, typed with the remote or the on-screen keyboard's mic.
 - Channel changing with ▲▼ or CH+/CH−, plus typed channel numbers.
 - Favourites: hold OK on a channel, or press the Menu button.
@@ -36,7 +35,7 @@ that in Settings. You can also add your own M3U playlist link.
 
 | While watching | |
 |---|---|
-| OK or ◀ | Open the channel list |
+| OK or ◀ | Open the channel picker / guide |
 | ▲ / ▼, CH+ / CH− | Previous / next channel |
 | ▶ or Info | Show what's on |
 | Guide | Open the TV guide (press again, or Back, to close) |
@@ -61,7 +60,10 @@ that in Settings. You can also add your own M3U playlist link.
 |---|---|
 | ▲ / ▼ | Move between channels |
 | ◀ / ▶ | Earlier / later programmes |
-| ▲ from the top row, or 🔴 / 🟢 | Switch category (All, With listings, News, Movies…) |
+| ▲ from the top row, then ◀ ▶ | Choose a tab (Favourites, All, Search, categories, Settings) |
+| 🔴 / 🟢 | Previous / next tab |
+| 🟡 or Menu | Add or remove the highlighted channel from Favourites |
+| 🔵 | Search |
 | CH+ / CH− | Page up / down |
 | Number keys | Jump to that channel |
 | OK | Show that channel in the little picture; OK again to watch full screen |

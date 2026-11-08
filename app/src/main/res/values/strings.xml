@@ -38,7 +38,7 @@
     <string name="guide_not_set_up_long">The TV guide hasn\'t been set up for this copy of ChannelBox. See the README for the one-time GitHub step.</string>
     <string name="guide_failed_long">The TV guide couldn\'t be downloaded. If you\'ve only just set it up, the first guide can take up to an hour to appear. Choose Refresh to try again.</string>
     <string name="guide_no_info">No information</string>
-    <string name="guide_hint">OK: show in the little picture (OK again: full screen) · ▲▼ channels · ◀▶ earlier / later · ▲ from the top or 🔴 🟢: categories · CH+/−: page · Back: close</string>
+    <string name="guide_hint">OK: show in the little picture (again: full screen) · ▲ at the top: tabs · 🔴 🟢 change tab · 🟡 or Menu: favourite · 🔵 search · CH+/−: page · Back: close</string>
     <string name="guide_heading">TV GUIDE · %1$s</string>
     <string name="guide_channel_line">%1$d  %2$s</string>
     <string name="guide_no_listings">No listings for this channel</string>
@@ -48,7 +48,16 @@
     <string name="guide_empty">There are no channels in this list.</string>
     <string name="no_guide_for_channel">No listings for this channel.</string>
 
-    <string name="guide_tab_all">All</string>
+    <string name="guide_tab_all">All channels</string>
+    <string name="guide_tab_favourites">★ Favourites</string>
+    <string name="guide_tab_recent">🕘 Recently watched</string>
+    <string name="guide_tab_search">🔍 Search</string>
+    <string name="guide_tab_settings">⚙ Settings</string>
+    <string name="guide_settings_title">Settings</string>
+    <string name="guide_settings_desc">Press OK to choose countries, lists, picture quality, check for updates and more.</string>
+    <string name="guide_search_title">Search</string>
+    <string name="guide_search_desc">Press ▼ or OK to type a channel name, or use the keyboard\'s microphone. ▼ again takes you to the results.</string>
+    <string name="refresh_now">Refresh channel lists now</string>
     <string name="guide_tab_listed">With listings</string>
     <string name="guide_heading_category">TV GUIDE · %1$s · %2$s</string>
 
