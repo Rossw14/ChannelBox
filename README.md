@@ -12,7 +12,11 @@ You can add your own M3U playlist link later in Settings.
 - Channel changing with ▲▼ or CH+/CH−, plus typed channel numbers.
 - Favourites: hold OK on a channel, or press the Menu button.
 - When it starts, it carries on with the channel you were last watching.
-- Channels that fail are dimmed and labelled, so you can skip past dead links.
+- **One entry per channel.** Duplicates are merged, and if a stream fails the next one is tried automatically.
+- **Offline channels are hidden.** The TV quietly checks which channels answer, every few hours.
+  You can switch this off in Settings. Changing channel with ▲▼ skips channels that are down.
+- **TV guide.** Each channel row shows what's on now, and the banner shows Now and Next.
+  The **Guide** button on the remote (or on screen) opens the day's schedule for the highlighted channel.
 - Your playlist link's channels are listed first, with the free lists merged in after.
 - Channel lists are kept on the TV, so the app still opens if a list is briefly unreachable.
 
@@ -23,6 +27,7 @@ You can add your own M3U playlist link later in Settings.
 | OK or ◀ | Open the channel list |
 | ▲ / ▼, CH+ / CH− | Previous / next channel |
 | ▶ or Info | Show what's on |
+| Guide | Open the TV guide (press again to close) |
 | Number keys | Jump to a channel number |
 | Menu | Add or remove the current channel from Favourites |
 | Back, Back | Exit |
@@ -41,7 +46,7 @@ You can add your own M3U playlist link later in Settings.
 1. Create a free account at github.com, then make a new **private** repository called `ChannelBox`.
 2. Upload this whole folder to it. The easiest route is **Add file → Upload files**, dragging in everything,
    including the hidden `.github` folder. If the web uploader skips that folder, create
-   `.github/workflows/build.yml` by hand and paste in its contents.
+   `.github/workflows/main.yml` (and `guide.yml`) by hand and paste in its contents.
 3. Open the **Actions** tab. A "Build APK" run starts automatically and takes about 3–5 minutes.
 4. When it shows a green tick, open the run and download **ChannelBox-apk** under *Artifacts*.
    Unzip it to get `ChannelBox.apk`.
@@ -70,6 +75,19 @@ On the Sony TV:
    `ChannelBox.apk` and choose **Install**.
 3. ChannelBox then appears in your apps row on the home screen. You can move it to the favourites row.
 
+## TV guide set-up (one time)
+
+The listings come from the free iptv-org guide tools. These don't publish a ready-made UK guide,
+so this project includes a job (`.github/workflows/guide.yml`) that GitHub runs twice a day.
+It collects about two days of listings for the channels in `guide-playlists.txt` and saves them to a
+branch called `guide`.
+
+The TV can only download that file if the project is **public**: **Settings → General →
+Danger Zone → Change visibility → Make public**. The project contains only the app's code, so
+nothing personal is exposed.
+
+To run the guide job straight away instead of waiting, go to **Actions → Update TV guide → Run workflow**.
+
 ## Adding your own playlist later
 
 Open ChannelBox, go to **Settings**, and paste an M3U or M3U8 link into "Your own playlist".
@@ -84,7 +102,9 @@ phone (the remote button, then the keyboard icon).
 - **Colours:** `app/src/main/res/values/colors.xml`.
 - **Wording:** `app/src/main/res/values/strings.xml`.
 
-Possible next steps: a TV guide (EPG) using iptv-org's guide data, search, and Xtream-code logins.
+- **Guide coverage:** add playlist links to `guide-playlists.txt` (for example if you turn on the Ireland list).
+
+Possible next steps: a full grid-style guide, search, recordings reminders, and Xtream-code logins.
 
 ## Good to know
 

@@ -8,6 +8,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.AudioAttributes
@@ -22,11 +24,14 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import java.util.Date
 import java.util.concurrent.Executors
 
 class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener {
 
     private lateinit var prefs: Prefs
+    private lateinit var health: HealthChecker
+    private lateinit var timeFormat: java.text.DateFormat
 
     // Views
     private lateinit var playerView: PlayerView
@@ -35,10 +40,15 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var channelList: RecyclerView
     private lateinit var listTitle: TextView
     private lateinit var emptyText: TextView
+    private lateinit var statusText: TextView
+    private lateinit var scheduleColumn: View
+    private lateinit var scheduleTitle: TextView
+    private lateinit var scheduleList: LinearLayout
     private lateinit var banner: View
     private lateinit var bannerNumber: TextView
     private lateinit var bannerName: TextView
     private lateinit var bannerInfo: TextView
+    private lateinit var bannerNext: TextView
     private lateinit var bannerStatus: TextView
     private lateinit var numberEntry: TextView
     private lateinit var loadingView: View
@@ -50,21 +60,39 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var player: ExoPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
     private val loader = Executors.newSingleThreadExecutor()
+    private val checker = Executors.newSingleThreadExecutor()
+    @Volatile private var checkGeneration = 0
 
-    // State
+    // Channel data
     private var allChannels: List<Channel> = emptyList()
+    private var favourites: Set<String> = emptySet()
+    private var hideOffline = true
+    private var guide = GuideData.EMPTY
+    private var guideState = GuideState.LOADING
+    private var healthText = ""
+
+    // What's on screen
     private var groups: List<Group> = emptyList()
     private var currentGroupIndex = 0
     private var visibleChannels: List<Channel> = emptyList()
+    private var guideMode = false
+
+    // What's playing
     private var playingList: List<Channel> = emptyList()
     private var playingIndex = -1
     private var currentChannel: Channel? = null
+    private var streamQueue: List<Stream> = emptyList()
+    private var streamIndex = 0
     private var triedHlsFallback = false
-    private val failedUrls = HashSet<String>()
+
     private var loadedSettingsVersion = -1
+    private var loading = false
+    private var reloadPending = false
+    private var lastLoadTime = 0L
     private var lastBackPress = 0L
     private var digits = ""
-    private var loading = false
+
+    private enum class GuideState { LOADING, READY, NOT_SET_UP, FAILED }
 
     private val hideBanner = Runnable { banner.visibility = View.GONE }
     private val commitDigits = Runnable { jumpToNumber() }
@@ -75,6 +103,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         prefs = Prefs(this)
+        health = HealthChecker(applicationContext)
+        timeFormat = android.text.format.DateFormat.getTimeFormat(this)
 
         playerView = findViewById(R.id.player_view)
         overlay = findViewById(R.id.overlay)
@@ -82,18 +112,27 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         channelList = findViewById(R.id.channel_list)
         listTitle = findViewById(R.id.list_title)
         emptyText = findViewById(R.id.empty_text)
+        statusText = findViewById(R.id.status_text)
+        scheduleColumn = findViewById(R.id.schedule_column)
+        scheduleTitle = findViewById(R.id.schedule_title)
+        scheduleList = findViewById(R.id.schedule_list)
         banner = findViewById(R.id.banner)
         bannerNumber = findViewById(R.id.banner_number)
         bannerName = findViewById(R.id.banner_name)
         bannerInfo = findViewById(R.id.banner_info)
+        bannerNext = findViewById(R.id.banner_next)
         bannerStatus = findViewById(R.id.banner_status)
         numberEntry = findViewById(R.id.number_entry)
         loadingView = findViewById(R.id.loading)
         loadingText = findViewById(R.id.loading_text)
 
         groupAdapter = GroupAdapter(this)
-        channelAdapter = ChannelAdapter(this)
-        channelAdapter.failedUrls = failedUrls
+        channelAdapter = ChannelAdapter(
+            listener = this,
+            describe = { describeChannel(it) },
+            isOffline = { health.channelStatus(it) == false },
+            isFavourite = { isFavourite(it) },
+        )
         groupList.layoutManager = LinearLayoutManager(this)
         groupList.adapter = groupAdapter
         channelList.layoutManager = LinearLayoutManager(this)
@@ -101,6 +140,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         channelList.itemAnimator = null
         groupList.itemAnimator = null
 
+        findViewById<View>(R.id.guide_button).setOnClickListener { setGuideMode(!guideMode) }
         findViewById<View>(R.id.settings_button).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -113,14 +153,18 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     override fun onStart() {
         super.onStart()
         createPlayer()
-        currentChannel?.let { startPlayback(it, forceHls = false) }
+        streamQueue.getOrNull(streamIndex)?.let { startPlayback(it, forceHls = false) }
     }
 
     override fun onResume() {
         super.onResume()
-        if (prefs.settingsVersion != loadedSettingsVersion) {
-            loadedSettingsVersion = prefs.settingsVersion
-            loadPlaylist(force = true)
+        when {
+            prefs.settingsVersion != loadedSettingsVersion -> {
+                loadedSettingsVersion = prefs.settingsVersion
+                loadPlaylist(force = true)
+            }
+            // Coming back after a few hours: pick up new listings and re-check channels.
+            SystemClock.elapsedRealtime() - lastLoadTime > 3L * 60 * 60 * 1000 -> loadPlaylist(force = false)
         }
     }
 
@@ -131,23 +175,45 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     override fun onDestroy() {
         super.onDestroy()
+        checkGeneration++
         handler.removeCallbacksAndMessages(null)
         loader.shutdownNow()
+        checker.shutdownNow()
     }
 
-    // ---------------------------------------------------------------- playlist
+    // ---------------------------------------------------------------- loading
 
     private fun loadPlaylist(force: Boolean) {
-        if (loading) return
+        if (loading) {
+            reloadPending = true
+            return
+        }
         loading = true
+        lastLoadTime = SystemClock.elapsedRealtime()
+        hideOffline = prefs.hideOffline
+        if (force) health.forgetFailures()
         loadingText.setText(R.string.loading_channels)
         loadingView.visibility = View.VISIBLE
+
         val appContext = applicationContext
         loader.execute {
-            val result = PlaylistRepository.load(appContext, prefs, force)
+            val playlist = PlaylistRepository.load(appContext, prefs, force)
+            handler.post { if (!isDestroyed) onPlaylistLoaded(playlist) }
+
+            val guideUrls = ArrayList<String>()
+            if (BuildConfig.GUIDE_URL.isNotEmpty()) guideUrls.add(BuildConfig.GUIDE_URL)
+            guideUrls.addAll(playlist.guideUrls)
+            val wanted = playlist.channels.mapNotNullTo(HashSet()) { it.guideId }
+            val guideResult = GuideRepository.load(appContext, guideUrls.distinct(), wanted, force)
+
             handler.post {
                 loading = false
-                if (!isDestroyed) onPlaylistLoaded(result)
+                if (isDestroyed) return@post
+                onGuideLoaded(guideResult)
+                if (reloadPending) {
+                    reloadPending = false
+                    loadPlaylist(force = true)
+                }
             }
         }
     }
@@ -155,6 +221,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun onPlaylistLoaded(result: PlaylistRepository.LoadResult) {
         loadingView.visibility = View.GONE
         allChannels = result.channels
+        favourites = prefs.favourites
         rebuildGroups(keepSelection = currentChannel != null)
 
         if (result.errors.isNotEmpty()) {
@@ -163,40 +230,109 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         if (allChannels.isEmpty()) {
             emptyText.setText(R.string.no_channels)
-            showOverlay()
-            return
-        }
-
-        if (currentChannel == null) {
-            val last = prefs.lastChannelUrl
+            showOverlay(guide = false)
+        } else if (currentChannel == null) {
+            val last = prefs.lastChannel
             val allIndex = groups.indexOfFirst { it.kind == Group.Kind.ALL }
-            val lastIndex = allChannels.indexOfFirst { it.url == last }
-            if (last != null && lastIndex >= 0 && allIndex >= 0) {
+            val allList = groups.getOrNull(allIndex)?.channels.orEmpty()
+            val lastIndex = allList.indexOfFirst { it.id == last || (last != null && it.hasUrl(setOf(last))) }
+            if (lastIndex >= 0) {
                 // Pick up where you left off, like a normal TV.
                 selectGroup(allIndex)
-                playChannel(groups[allIndex].channels, lastIndex)
+                playChannel(allList, lastIndex)
                 hideOverlay()
             } else {
-                showOverlay()
+                showOverlay(guide = false)
             }
-        } else if (overlay.visibility == View.VISIBLE) {
-            showOverlay()
+        } else {
+            // Settings changed or Refresh pressed while watching: keep playing,
+            // but point at the updated version of the channel.
+            val playingId = currentChannel?.id
+            allChannels.firstOrNull { it.id == playingId }?.let { currentChannel = it }
+            if (overlay.visibility == View.VISIBLE) showOverlay(guideMode)
         }
+        startHealthCheck()
+    }
+
+    private fun onGuideLoaded(result: GuideRepository.LoadResult) {
+        guide = result.data
+        guideState = when {
+            !result.configured -> GuideState.NOT_SET_UP
+            result.data.isEmpty -> GuideState.FAILED
+            else -> GuideState.READY
+        }
+        updateStatusText()
+        channelAdapter.notifyDataSetChanged()
+        if (guideMode) showSchedule(focusedChannel() ?: currentChannel)
+        if (banner.visibility == View.VISIBLE) currentChannel?.let { showBanner(it, null) }
+    }
+
+    private fun startHealthCheck() {
+        val generation = ++checkGeneration
+        val channels = allChannels
+        healthText = getString(R.string.checking_channels_start)
+        updateStatusText()
+        checker.execute {
+            health.checkAll(
+                channels,
+                onProgress = { done, total ->
+                    handler.post {
+                        if (generation == checkGeneration) {
+                            healthText = getString(R.string.checking_channels, done, total)
+                            updateStatusText()
+                        }
+                    }
+                },
+                isCancelled = { generation != checkGeneration },
+            )
+            handler.post {
+                if (!isDestroyed && generation == checkGeneration) onHealthChecked()
+            }
+        }
+    }
+
+    private fun onHealthChecked() {
+        val working = allChannels.count { health.channelStatus(it) != false }
+        healthText = getString(R.string.channels_working, working, allChannels.size)
+        updateStatusText()
+        refreshLists()
+    }
+
+    private fun updateStatusText() {
+        val guideText = when (guideState) {
+            GuideState.LOADING -> getString(R.string.guide_loading)
+            GuideState.READY -> getString(R.string.guide_ready, guide.channelCount)
+            GuideState.NOT_SET_UP -> getString(R.string.guide_not_set_up)
+            GuideState.FAILED -> getString(R.string.guide_failed)
+        }
+        statusText.text = listOf(healthText, guideText).filter { it.isNotEmpty() }.joinToString("\n")
+    }
+
+    // ---------------------------------------------------------------- lists
+
+    private fun isFavourite(channel: Channel): Boolean =
+        channel.id in favourites || channel.hasUrl(favourites)
+
+    /** Channels to list: working (or not yet checked) ones, unless the setting says show all. */
+    private fun shownChannels(): List<Channel> {
+        if (!hideOffline) return allChannels
+        val playingId = currentChannel?.id
+        return allChannels.filter { health.channelStatus(it) != false || it.id == playingId }
     }
 
     private fun rebuildGroups(keepSelection: Boolean) {
         val previous = groups.getOrNull(currentGroupIndex)
-        val favourites = prefs.favourites
+        val shown = shownChannels()
 
         val built = ArrayList<Group>()
-        val favChannels = allChannels.filter { it.url in favourites }
+        val favChannels = shown.filter { isFavourite(it) }
         if (favChannels.isNotEmpty()) {
             built.add(Group("favourites", favChannels, Group.Kind.FAVOURITES))
         }
-        built.add(Group("all", allChannels, Group.Kind.ALL))
+        built.add(Group("all", shown, Group.Kind.ALL))
 
         val byCategory = LinkedHashMap<String, MutableList<Channel>>()
-        for (channel in allChannels) {
+        for (channel in shown) {
             for (g in channel.groups) byCategory.getOrPut(g) { ArrayList() }.add(channel)
         }
         byCategory.keys
@@ -205,7 +341,6 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         groups = built
         groupAdapter.submit(groups)
-        channelAdapter.favourites = favourites
 
         var index = -1
         if (keepSelection && previous != null) {
@@ -217,14 +352,30 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         selectGroup(index)
     }
 
-    private fun selectGroup(index: Int) {
-        if (groups.isEmpty()) {
-            visibleChannels = emptyList()
-            channelAdapter.submit(visibleChannels)
-            emptyText.visibility = View.VISIBLE
-            listTitle.text = ""
-            return
+    /** Rebuild the lists while keeping the highlighted row where it was. */
+    private fun refreshLists() {
+        val focus = currentFocus
+        val channelRow = focus?.let { channelList.findContainingItemView(it) }
+        val groupRow = focus?.let { groupList.findContainingItemView(it) }
+        val focusedId = channelRow?.let { visibleChannels.getOrNull(channelList.getChildAdapterPosition(it))?.id }
+
+        rebuildGroups(keepSelection = true)
+        if (overlay.visibility != View.VISIBLE) return
+        when {
+            channelRow != null -> {
+                if (visibleChannels.isEmpty()) {
+                    focusGroup(currentGroupIndex)
+                } else {
+                    val i = visibleChannels.indexOfFirst { it.id == focusedId }
+                    focusChannel(if (i >= 0) i else 0)
+                }
+            }
+            groupRow != null -> focusGroup(currentGroupIndex)
         }
+    }
+
+    private fun selectGroup(index: Int) {
+        if (groups.isEmpty()) return
         val previousSelected = groupAdapter.selected
         currentGroupIndex = index.coerceIn(0, groups.size - 1)
         val group = groups[currentGroupIndex]
@@ -245,9 +396,20 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             emptyText.visibility = View.VISIBLE
         } else {
             emptyText.visibility = View.GONE
-            val playingPos = visibleChannels.indexOfFirst { it.url == currentChannel?.url }
+            val playingPos = visibleChannels.indexOfFirst { it.id == currentChannel?.id }
             channelList.scrollToPosition(if (playingPos >= 0) playingPos else 0)
         }
+    }
+
+    private fun describeChannel(channel: Channel): String {
+        if (health.channelStatus(channel) == false) return getString(R.string.unavailable)
+        guide.current(channel, System.currentTimeMillis())?.let {
+            return getString(R.string.now_short, it.title)
+        }
+        val parts = ArrayList<String>()
+        parts.add(channel.groups.joinToString(", "))
+        if (channel.streams.size > 1) parts.add(getString(R.string.stream_count, channel.streams.size))
+        return parts.joinToString("  ·  ")
     }
 
     // ---------------------------------------------------------------- playback
@@ -260,10 +422,12 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
-                    currentChannel?.let { ch ->
-                        if (failedUrls.remove(ch.url)) channelAdapter.notifyDataSetChanged()
+                    val stream = streamQueue.getOrNull(streamIndex) ?: return
+                    if (health.record(stream.url, true)) channelAdapter.notifyDataSetChanged()
+                    if (bannerStatus.visibility == View.VISIBLE) {
+                        bannerStatus.text = ""
+                        bannerStatus.visibility = View.GONE
                     }
-                    if (bannerStatus.text.isNotEmpty()) bannerStatus.text = ""
                 }
             }
 
@@ -288,27 +452,30 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         playingList = list
         playingIndex = i
         currentChannel = channel
-        triedHlsFallback = false
-        prefs.lastChannelUrl = channel.url
+        prefs.lastChannel = channel.id
 
-        startPlayback(channel, forceHls = false)
+        streamQueue = health.ordered(channel)
+        streamIndex = 0
+        triedHlsFallback = false
+        streamQueue.firstOrNull()?.let { startPlayback(it, forceHls = false) }
+
         showBanner(channel, null)
-        channelAdapter.playingUrl = channel.url
+        channelAdapter.playingId = channel.id
         channelAdapter.notifyDataSetChanged()
     }
 
-    private fun startPlayback(channel: Channel, forceHls: Boolean) {
+    private fun startPlayback(stream: Stream, forceHls: Boolean) {
         val exo = player ?: return
 
         val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(channel.userAgent ?: DEFAULT_USER_AGENT)
+            .setUserAgent(stream.userAgent ?: Net.BROWSER_USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(15_000)
-        channel.referrer?.let { http.setDefaultRequestProperties(mapOf("Referer" to it)) }
+        stream.referrer?.let { http.setDefaultRequestProperties(mapOf("Referer" to it)) }
 
-        val item = MediaItem.Builder().setUri(channel.url)
-        val mime = if (forceHls) MimeTypes.APPLICATION_M3U8 else guessMimeType(channel.url)
+        val item = MediaItem.Builder().setUri(stream.url)
+        val mime = if (forceHls) MimeTypes.APPLICATION_M3U8 else guessMimeType(stream.url)
         if (mime != null) item.setMimeType(mime)
 
         val source = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
@@ -332,21 +499,32 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun handlePlaybackError(error: PlaybackException) {
         val channel = currentChannel ?: return
         val exo = player ?: return
+        val stream = streamQueue.getOrNull(streamIndex) ?: return
 
         if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
             exo.seekToDefaultPosition()
             exo.prepare()
             return
         }
-        // Some links don't say they're HLS; try that once before giving up.
-        if (!triedHlsFallback && guessMimeType(channel.url) == null) {
+        // Some links don't say they're HLS; try that once before moving on.
+        if (!triedHlsFallback && guessMimeType(stream.url) == null) {
             triedHlsFallback = true
-            startPlayback(channel, forceHls = true)
+            startPlayback(stream, forceHls = true)
             return
         }
 
-        failedUrls.add(channel.url)
-        channelAdapter.failedUrls = failedUrls
+        health.record(stream.url, false)
+
+        // Try the channel's next stream, if it has one.
+        if (streamIndex + 1 < streamQueue.size) {
+            streamIndex++
+            triedHlsFallback = false
+            showBanner(channel, getString(R.string.trying_backup, streamIndex + 1, streamQueue.size))
+            startPlayback(streamQueue[streamIndex], forceHls = false)
+            return
+        }
+
+        checker.execute { health.save() }
         channelAdapter.notifyDataSetChanged()
 
         val reason = when (error.errorCode) {
@@ -365,36 +543,55 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         showBanner(channel, reason)
     }
 
+    /** Next/previous channel, skipping ones known not to work. */
     private fun zap(delta: Int) {
         if (playingList.isEmpty()) {
             if (visibleChannels.isNotEmpty()) playChannel(visibleChannels, 0)
             return
         }
-        playChannel(playingList, playingIndex + delta)
+        var index = playingIndex
+        for (step in 1..playingList.size) {
+            index = (index + delta).mod(playingList.size)
+            if (health.channelStatus(playingList[index]) != false) break
+        }
+        playChannel(playingList, index)
     }
 
     // ---------------------------------------------------------------- on-screen bits
 
+    private fun time(millis: Long): String = timeFormat.format(Date(millis))
+
     private fun showBanner(channel: Channel, status: String?) {
         bannerNumber.text = if (playingIndex >= 0) (playingIndex + 1).toString() else ""
-        bannerName.text = channel.displayName
-        bannerInfo.text = (listOf(channel.groups.joinToString(", ")) + channel.tags)
-            .filter { it.isNotEmpty() }
-            .joinToString("  ·  ")
+        bannerName.text = channel.name
+
+        val now = System.currentTimeMillis()
+        val current = guide.current(channel, now)
+        val next = guide.next(channel, now)
+        if (current != null) {
+            bannerInfo.text = getString(R.string.now_until, current.title, time(current.stop))
+            bannerNext.text = next?.let { getString(R.string.next_at, time(it.start), it.title) } ?: ""
+        } else {
+            bannerInfo.text = channel.groups.joinToString(", ")
+            bannerNext.text = ""
+        }
+        bannerNext.visibility = if (bannerNext.text.isEmpty()) View.GONE else View.VISIBLE
+
         bannerStatus.text = status ?: ""
         bannerStatus.visibility = if (status == null) View.GONE else View.VISIBLE
         banner.visibility = View.VISIBLE
         handler.removeCallbacks(hideBanner)
-        handler.postDelayed(hideBanner, if (status == null) 4_000L else 8_000L)
+        handler.postDelayed(hideBanner, if (status == null) 5_000L else 8_000L)
     }
 
-    private fun showOverlay() {
+    private fun showOverlay(guide: Boolean) {
         overlay.visibility = View.VISIBLE
         banner.visibility = View.GONE
+        setGuideMode(guide)
         if (visibleChannels.isEmpty()) {
             focusGroup(currentGroupIndex)
         } else {
-            val playingPos = visibleChannels.indexOfFirst { it.url == currentChannel?.url }
+            val playingPos = visibleChannels.indexOfFirst { it.id == currentChannel?.id }
             focusChannel(if (playingPos >= 0) playingPos else 0)
         }
     }
@@ -402,6 +599,66 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun hideOverlay() {
         if (currentChannel == null) return
         overlay.visibility = View.GONE
+        if (guideMode) setGuideMode(false)
+    }
+
+    /** The TV guide panel: the picker widens to full screen with a schedule on the right. */
+    private fun setGuideMode(on: Boolean) {
+        guideMode = on
+        scheduleColumn.visibility = if (on) View.VISIBLE else View.GONE
+        val params = overlay.layoutParams
+        params.width = if (on) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+        overlay.layoutParams = params
+        if (on) showSchedule(focusedChannel() ?: currentChannel ?: visibleChannels.firstOrNull())
+    }
+
+    private fun showSchedule(channel: Channel?) {
+        scheduleList.removeAllViews()
+        if (channel == null) {
+            scheduleTitle.text = ""
+            return
+        }
+        scheduleTitle.text = channel.name
+
+        val now = System.currentTimeMillis()
+        val programmes = guide.upcoming(channel, now).take(14)
+        if (programmes.isEmpty()) {
+            val message = layoutInflater.inflate(R.layout.item_programme, scheduleList, false)
+            message.findViewById<TextView>(R.id.programme_time).visibility = View.GONE
+            message.findViewById<TextView>(R.id.programme_title).text = when (guideState) {
+                GuideState.READY -> getString(R.string.no_guide_for_channel)
+                GuideState.LOADING -> getString(R.string.guide_loading)
+                GuideState.NOT_SET_UP -> getString(R.string.guide_not_set_up_long)
+                GuideState.FAILED -> getString(R.string.guide_failed_long)
+            }
+            message.findViewById<TextView>(R.id.programme_desc).visibility = View.GONE
+            scheduleList.addView(message)
+            return
+        }
+
+        for (p in programmes) {
+            val row = layoutInflater.inflate(R.layout.item_programme, scheduleList, false)
+            val isNow = p.start <= now && p.stop > now
+            row.isActivated = isNow
+            row.findViewById<TextView>(R.id.programme_time).text =
+                if (isNow) getString(R.string.on_now) else time(p.start)
+            row.findViewById<TextView>(R.id.programme_title).text = p.title
+
+            val details = ArrayList<String>()
+            if (isNow) details.add(getString(R.string.until_time, time(p.stop)))
+            p.subtitle?.let { details.add(it) }
+            if (isNow) p.description?.let { details.add(it) }
+            val desc = row.findViewById<TextView>(R.id.programme_desc)
+            desc.text = details.joinToString("\n")
+            desc.visibility = if (details.isEmpty()) View.GONE else View.VISIBLE
+            scheduleList.addView(row)
+        }
+    }
+
+    private fun focusedChannel(): Channel? {
+        val focus = currentFocus ?: return null
+        val row = channelList.findContainingItemView(focus) ?: return null
+        return visibleChannels.getOrNull(channelList.getChildAdapterPosition(row))
     }
 
     private fun focusChannel(position: Int) {
@@ -429,7 +686,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             if (row != null) {
                 row.requestFocus()
             } else if (attempt < 8) {
-                handler.postDelayed({ requestFocusAt(list, position, attempt + 1) }, 40)
+                handler.postDelayed({ requestFocusAt(list, position, attempt + 1) }, 40L)
             }
         }
     }
@@ -449,6 +706,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         visibleChannels.getOrNull(position)?.let { toggleFavourite(it) }
     }
 
+    override fun onChannelFocused(position: Int) {
+        if (guideMode) showSchedule(visibleChannels.getOrNull(position))
+    }
+
     override fun onGroupFocused(position: Int) {
         if (position != currentGroupIndex) selectGroup(position)
     }
@@ -459,24 +720,15 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     }
 
     private fun toggleFavourite(channel: Channel) {
-        val favourites = prefs.favourites.toMutableSet()
-        val added = favourites.add(channel.url)
-        if (!added) favourites.remove(channel.url)
-        prefs.favourites = favourites
-        toast(getString(if (added) R.string.fav_added else R.string.fav_removed, channel.displayName))
-
-        // Remember which row had focus so it stays put after the lists refresh.
-        val focusedRow = currentFocus?.let { channelList.findContainingItemView(it) }
-        val focusedPos = focusedRow?.let { channelList.getChildAdapterPosition(it) } ?: -1
-
-        rebuildGroups(keepSelection = true)
-        if (overlay.visibility == View.VISIBLE) {
-            if (visibleChannels.isNotEmpty() && focusedPos >= 0) {
-                focusChannel(focusedPos)
-            } else {
-                focusGroup(currentGroupIndex)
-            }
-        }
+        val updated = favourites.toMutableSet()
+        val wasFavourite = isFavourite(channel)
+        updated.remove(channel.id)
+        channel.streams.forEach { updated.remove(it.url) } // tidy up 1.0-style entries
+        if (!wasFavourite) updated.add(channel.id)
+        favourites = updated
+        prefs.favourites = updated
+        toast(getString(if (wasFavourite) R.string.fav_removed else R.string.fav_added, channel.name))
+        refreshLists()
     }
 
     // ---------------------------------------------------------------- remote control
@@ -497,6 +749,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         when (code) {
             KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
             KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
+            KeyEvent.KEYCODE_GUIDE -> { pressGuide(); return true }
         }
 
         val overlayVisible = overlay.visibility == View.VISIBLE
@@ -516,11 +769,12 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 }
                 code == KeyEvent.KEYCODE_DPAD_RIGHT && inGroups -> {
                     if (visibleChannels.isNotEmpty()) {
-                        val playingPos = visibleChannels.indexOfFirst { it.url == currentChannel?.url }
+                        val playingPos = visibleChannels.indexOfFirst { it.id == currentChannel?.id }
                         focusChannel(if (playingPos >= 0) playingPos else 0)
                     }
                     return true
                 }
+                code == KeyEvent.KEYCODE_DPAD_RIGHT && inChannels -> return true // nothing to the right
             }
             return super.dispatchKeyEvent(event)
         }
@@ -532,7 +786,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER,
-            KeyEvent.KEYCODE_DPAD_LEFT -> showOverlay()
+            KeyEvent.KEYCODE_DPAD_LEFT -> showOverlay(guide = false)
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_INFO -> currentChannel?.let { showBanner(it, null) }
             KeyEvent.KEYCODE_MENU -> currentChannel?.let { toggleFavourite(it) }
@@ -541,12 +795,26 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         return true
     }
 
+    /** Guide button: open the guide, or close it if it's already showing. */
+    private fun pressGuide() {
+        when {
+            overlay.visibility != View.VISIBLE -> showOverlay(guide = true)
+            !guideMode -> setGuideMode(true)
+            currentChannel != null -> hideOverlay()
+            else -> setGuideMode(false)
+        }
+    }
+
     private fun handleBack() {
         val now = SystemClock.uptimeMillis()
         val overlayVisible = overlay.visibility == View.VISIBLE
 
         if (overlayVisible && currentChannel != null) {
             hideOverlay() // back to the picture
+            return
+        }
+        if (overlayVisible && guideMode) {
+            setGuideMode(false)
             return
         }
         if (now - lastBackPress < 2_000) {
@@ -563,7 +831,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         numberEntry.text = digits
         numberEntry.visibility = View.VISIBLE
         handler.removeCallbacks(commitDigits)
-        handler.postDelayed(commitDigits, 1_500)
+        handler.postDelayed(commitDigits, 1_500L)
     }
 
     private fun jumpToNumber() {
@@ -583,11 +851,5 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         } else {
             toast(getString(R.string.no_such_channel, number))
         }
-    }
-
-    companion object {
-        private const val DEFAULT_USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 12; BRAVIA 4K) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 }

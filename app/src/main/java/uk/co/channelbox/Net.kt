@@ -7,7 +7,12 @@ import java.net.URL
 
 /** Small HTTP helper for playlists and logos (follows http <-> https redirects). */
 object Net {
-    const val USER_AGENT = "ChannelBox/1.0 (Android TV)"
+    const val USER_AGENT = "ChannelBox/1.1 (Android TV)"
+
+    /** Sent to stream servers, many of which only answer normal browsers. */
+    const val BROWSER_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 12; BRAVIA 4K) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     fun get(url: String, maxBytes: Int = 40 * 1024 * 1024): ByteArray {
         var current = url

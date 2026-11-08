@@ -14,13 +14,19 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_CUSTOM_URL, "") ?: ""
         set(value) = sp.edit().putString(KEY_CUSTOM_URL, value.trim()).apply()
 
+    /** Channel ids (older versions stored stream links; both are understood). */
     var favourites: Set<String>
         get() = sp.getStringSet(KEY_FAVOURITES, null)?.toSet() ?: emptySet()
         set(value) = sp.edit().putStringSet(KEY_FAVOURITES, HashSet(value)).apply()
 
-    var lastChannelUrl: String?
+    /** Channel id, or a stream link saved by version 1.0. */
+    var lastChannel: String?
         get() = sp.getString(KEY_LAST_CHANNEL, null)
         set(value) = sp.edit().putString(KEY_LAST_CHANNEL, value).apply()
+
+    var hideOffline: Boolean
+        get() = sp.getBoolean(KEY_HIDE_OFFLINE, true)
+        set(value) = sp.edit().putBoolean(KEY_HIDE_OFFLINE, value).apply()
 
     /** Bumped whenever settings are saved, so the main screen knows to reload. */
     var settingsVersion: Int
@@ -32,6 +38,7 @@ class Prefs(context: Context) {
         private const val KEY_CUSTOM_URL = "custom_url"
         private const val KEY_FAVOURITES = "favourites"
         private const val KEY_LAST_CHANNEL = "last_channel"
+        private const val KEY_HIDE_OFFLINE = "hide_offline"
         private const val KEY_VERSION = "settings_version"
         val DEFAULT_SOURCES = setOf("uk")
     }

@@ -11,8 +11,22 @@ android {
         applicationId = "uk.co.channelbox"
         minSdk = 21
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+
+        // When built on GitHub, point the app at the TV guide that this
+        // project's "Update TV guide" job publishes on its "guide" branch.
+        val repo = System.getenv("GITHUB_REPOSITORY").orEmpty()
+        val guideUrl = if (repo.isNotEmpty()) {
+            "https://raw.githubusercontent.com/$repo/guide/guide.xml.gz"
+        } else {
+            ""
+        }
+        buildConfigField("String", "GUIDE_URL", "\"$guideUrl\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     // A fixed signing key so each new build installs over the previous one

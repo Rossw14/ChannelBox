@@ -41,6 +41,9 @@ class SettingsActivity : Activity() {
             checkBoxes.add(source to box)
         }
 
+        val hideOffline = findViewById<CheckBox>(R.id.hide_offline)
+        hideOffline.isChecked = prefs.hideOffline
+
         val urlField = findViewById<EditText>(R.id.custom_url)
         urlField.setText(prefs.customUrl)
 
@@ -58,6 +61,7 @@ class SettingsActivity : Activity() {
             }
             prefs.enabledSources = chosen
             prefs.customUrl = url
+            prefs.hideOffline = hideOffline.isChecked
             prefs.settingsVersion = prefs.settingsVersion + 1
             toast(getString(R.string.saved))
             finish()

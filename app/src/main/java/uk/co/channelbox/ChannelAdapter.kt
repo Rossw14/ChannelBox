@@ -7,19 +7,22 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
-class ChannelAdapter(private val listener: Listener) :
-    RecyclerView.Adapter<ChannelAdapter.Holder>() {
+class ChannelAdapter(
+    private val listener: Listener,
+    private val describe: (Channel) -> String,
+    private val isOffline: (Channel) -> Boolean,
+    private val isFavourite: (Channel) -> Boolean,
+) : RecyclerView.Adapter<ChannelAdapter.Holder>() {
 
     interface Listener {
         fun onChannelClick(position: Int)
         fun onChannelLongClick(position: Int)
+        fun onChannelFocused(position: Int)
     }
 
     var items: List<Channel> = emptyList()
         private set
-    var favourites: Set<String> = emptySet()
-    var failedUrls: Set<String> = emptySet()
-    var playingUrl: String? = null
+    var playingId: String? = null
 
     fun submit(list: List<Channel>) {
         items = list
@@ -47,27 +50,24 @@ class ChannelAdapter(private val listener: Listener) :
             if (pos != RecyclerView.NO_POSITION) listener.onChannelLongClick(pos)
             true
         }
+        view.setOnFocusChangeListener { _, hasFocus ->
+            val pos = holder.bindingAdapterPosition
+            if (hasFocus && pos != RecyclerView.NO_POSITION) listener.onChannelFocused(pos)
+        }
         return holder
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val channel = items[position]
         holder.number.text = (position + 1).toString()
-        holder.name.text = channel.displayName
-        holder.initial.text = channel.displayName.firstOrNull { it.isLetterOrDigit() }
+        holder.name.text = channel.name
+        holder.initial.text = channel.name.firstOrNull { it.isLetterOrDigit() }
             ?.uppercaseChar()?.toString() ?: "?"
         LogoLoader.load(channel.logo, holder.logo)
-
-        val failed = channel.url in failedUrls
-        val metaParts = ArrayList<String>()
-        if (failed) metaParts.add(holder.itemView.context.getString(R.string.unavailable))
-        metaParts.add(channel.groups.joinToString(", "))
-        metaParts.addAll(channel.tags)
-        holder.meta.text = metaParts.joinToString("  ·  ")
-
-        holder.star.visibility = if (channel.url in favourites) View.VISIBLE else View.GONE
-        holder.itemView.isActivated = channel.url == playingUrl
-        holder.itemView.alpha = if (failed) 0.55f else 1f
+        holder.meta.text = describe(channel)
+        holder.star.visibility = if (isFavourite(channel)) View.VISIBLE else View.GONE
+        holder.itemView.isActivated = channel.id == playingId
+        holder.itemView.alpha = if (isOffline(channel)) 0.55f else 1f
     }
 
     override fun getItemCount(): Int = items.size

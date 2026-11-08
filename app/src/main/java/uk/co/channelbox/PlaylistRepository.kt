@@ -23,7 +23,11 @@ object PlaylistRepository {
 
     private const val CACHE_MAX_AGE_MS = 6L * 60 * 60 * 1000 // 6 hours
 
-    data class LoadResult(val channels: List<Channel>, val errors: List<String>)
+    data class LoadResult(
+        val channels: List<Channel>,
+        val guideUrls: List<String>,
+        val errors: List<String>,
+    )
 
     fun load(context: Context, prefs: Prefs, forceRefresh: Boolean): LoadResult {
         val sources = ArrayList<PlaylistSource>()
@@ -32,7 +36,8 @@ object PlaylistRepository {
         val enabled = prefs.enabledSources
         sources.addAll(BUILT_IN.filter { it.id in enabled })
 
-        val byUrl = LinkedHashMap<String, Channel>()
+        val entries = ArrayList<PlaylistEntry>()
+        val guideUrls = ArrayList<String>()
         val errors = ArrayList<String>()
 
         for (source in sources) {
@@ -57,11 +62,11 @@ object PlaylistRepository {
             }
 
             if (text != null) {
-                for (channel in M3uParser.parse(text)) {
-                    if (!byUrl.containsKey(channel.url)) byUrl[channel.url] = channel
-                }
+                val parsed = M3uParser.parse(text)
+                entries.addAll(parsed.entries)
+                guideUrls.addAll(parsed.guideUrls)
             }
         }
-        return LoadResult(byUrl.values.toList(), errors)
+        return LoadResult(ChannelMerger.merge(entries), guideUrls.distinct(), errors)
     }
 }
