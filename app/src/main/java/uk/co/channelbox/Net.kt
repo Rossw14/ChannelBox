@@ -14,7 +14,11 @@ object Net {
         "Mozilla/5.0 (Linux; Android 12; BRAVIA 4K) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    fun get(url: String, maxBytes: Int = 40 * 1024 * 1024): ByteArray {
+    fun get(
+        url: String,
+        maxBytes: Int = 40 * 1024 * 1024,
+        headers: Map<String, String> = emptyMap(),
+    ): ByteArray {
         var current = url
         for (attempt in 0 until 6) {
             val conn = URL(current).openConnection() as HttpURLConnection
@@ -22,6 +26,7 @@ object Net {
             conn.readTimeout = 30_000
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", USER_AGENT)
+            for ((name, value) in headers) conn.setRequestProperty(name, value)
             try {
                 val code = conn.responseCode
                 if (code in 300..399) {

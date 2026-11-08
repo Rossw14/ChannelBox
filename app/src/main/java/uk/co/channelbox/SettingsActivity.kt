@@ -130,6 +130,9 @@ class SettingsActivity : Activity() {
         updateAppsVisibility()
         appsTab.setOnCheckedChangeListener { _, _ -> updateAppsVisibility() }
 
+        val tmdbKey = findViewById<EditText>(R.id.tmdb_key)
+        tmdbKey.setText(prefs.tmdbKey)
+
         val hideOffline = findViewById<CheckBox>(R.id.hide_offline)
         hideOffline.isChecked = prefs.hideOffline
 
@@ -187,6 +190,7 @@ class SettingsActivity : Activity() {
             prefs.customEnabled = customEnabled.isChecked
             prefs.hideOffline = hideOffline.isChecked
             prefs.appsTab = appsTab.isChecked
+            prefs.tmdbKey = tmdbKey.text.toString().trim()
             val ticked = appBoxes.filter { it.second.isChecked }.map { it.first }.toSet()
             if (ticked != chosenNow) prefs.chosenApps = ticked
             prefs.maxHeight = qualityOptions.firstOrNull { it.first == qualityGroup.checkedRadioButtonId }?.second ?: 0

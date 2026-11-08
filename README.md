@@ -9,6 +9,11 @@ that in Settings. You can also add your own M3U playlist link.
 ## What it does
 
 - A full-screen live player for HLS (`.m3u8`), DASH (`.mpd`) and plain stream links.
+- **Home page** when ChannelBox opens: your last channel playing top right, then rows for TV guide /
+  search / settings, Continue watching, Favourites (with what's on now), your apps, and, with a free
+  TMDB key, Trending films, Trending series and "Popular on Netflix / Prime Video / …" for the apps you
+  have. Picking a film hands it to Google TV search so it plays in the right app. Back from the picture
+  goes to Home; Back on Home (twice) exits.
 - **A Sky-style channel picker.** Press OK while watching to open the guide page: tabs across the top
   (⚙ Settings, ★ Favourites, 🔍 Search and 🕘 Recently watched first, then All channels, With listings and
   each category). Back from the channels jumps up to that menu row, every channel from your ticked countries A to Z underneath with what's on, and the live
@@ -129,6 +134,14 @@ project page. On the TV, go to **Settings → Check for updates** and choose **I
 The first time, Android asks you to allow ChannelBox to install apps: switch it on, press Back,
 and choose Check for updates again. ChannelBox also checks once a day and tells you when an
 update is waiting. You can also download `ChannelBox.apk` from the Releases page.
+
+## Trending films on the home page (free TMDB key)
+
+1. Make a free account at **themoviedb.org**, then go to your profile → **Settings → API** and request a
+   key (choose "Developer", personal use). It's approved straight away.
+2. Either paste the **API Key** into ChannelBox under **Settings → Films & series (TMDB)**, or, on GitHub,
+   add it as a repository secret called **TMDB_API_KEY** (**Settings → Secrets and variables → Actions →
+   New repository secret**) so every new build has it built in.
 
 ## Adding your own playlist later
 

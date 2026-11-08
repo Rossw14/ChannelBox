@@ -171,6 +171,39 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:layout_marginBottom="8dp"
+            android:text="@string/tmdb_heading"
+            android:textColor="@color/accent"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="@string/tmdb_help"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/tmdb_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/field_bg"
+            android:hint="@string/tmdb_hint"
+            android:imeOptions="actionDone"
+            android:importantForAutofill="no"
+            android:inputType="textNoSuggestions"
+            android:padding="14dp"
+            android:singleLine="true"
+            android:textColor="@color/white"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="17sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="8dp"
             android:text="@string/apps_heading"
             android:textColor="@color/accent"
             android:textSize="18sp"

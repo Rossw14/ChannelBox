@@ -24,6 +24,10 @@ android {
         val updateUrl = if (repo.isNotEmpty()) "https://github.com/$repo/releases/latest/download" else ""
         buildConfigField("String", "GUIDE_URL", "\"$guideUrl\"")
         buildConfigField("String", "UPDATE_URL", "\"$updateUrl\"")
+
+        // Optional free TMDB key for the home page's film rows, from the TMDB_API_KEY GitHub secret.
+        val tmdbKey = System.getenv("TMDB_API_KEY").orEmpty().filter { it.isLetterOrDigit() || it in "._-" }
+        buildConfigField("String", "TMDB_KEY", "\"$tmdbKey\"")
     }
 
     buildFeatures {

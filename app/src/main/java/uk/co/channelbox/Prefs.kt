@@ -71,6 +71,11 @@ class Prefs(context: Context) {
             else sp.edit().putStringSet(KEY_CHOSEN_APPS, HashSet(value)).apply()
         }
 
+    /** Free TMDB key for the home page's film rows (blank = use the one built in, if any). */
+    var tmdbKey: String
+        get() = sp.getString(KEY_TMDB, "") ?: ""
+        set(value) = sp.edit().putString(KEY_TMDB, value).apply()
+
     var hideOffline: Boolean
         get() = sp.getBoolean(KEY_HIDE_OFFLINE, true)
         set(value) = sp.edit().putBoolean(KEY_HIDE_OFFLINE, value).apply()
@@ -92,6 +97,7 @@ class Prefs(context: Context) {
         private const val KEY_LAST_CHANNEL = "last_channel"
         private const val KEY_HIDE_OFFLINE = "hide_offline"
         private const val KEY_APPS_TAB = "apps_tab"
+        private const val KEY_TMDB = "tmdb_key"
         private const val KEY_CHOSEN_APPS = "chosen_apps"
         private const val KEY_MAX_HEIGHT = "max_height"
         private const val KEY_LAST_UPDATE_CHECK = "last_update_check"

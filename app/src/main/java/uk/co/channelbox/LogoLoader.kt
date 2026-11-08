@@ -22,7 +22,7 @@ object LogoLoader {
     private val pool = Executors.newFixedThreadPool(4)
     private val main = Handler(Looper.getMainLooper())
 
-    fun load(url: String?, view: ImageView) {
+    fun load(url: String?, view: ImageView, targetSize: Int = TARGET_SIZE) {
         view.setTag(R.id.logo_url_tag, url)
         view.setImageDrawable(null)
         if (url.isNullOrBlank() || failed.contains(url)) return
@@ -34,7 +34,7 @@ object LogoLoader {
 
         pool.execute {
             val bitmap = try {
-                decode(Net.get(url, maxBytes = 3 * 1024 * 1024))
+                decode(Net.get(url, maxBytes = 3 * 1024 * 1024), targetSize)
             } catch (e: Exception) {
                 null
             }
@@ -68,13 +68,13 @@ object LogoLoader {
         }
     }
 
-    private fun decode(bytes: ByteArray): Bitmap? {
+    private fun decode(bytes: ByteArray, targetSize: Int = TARGET_SIZE): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= TARGET_SIZE &&
-            bounds.outHeight / (sample * 2) >= TARGET_SIZE
+        while (bounds.outWidth / (sample * 2) >= targetSize &&
+            bounds.outHeight / (sample * 2) >= targetSize
         ) {
             sample *= 2
         }

@@ -69,6 +69,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var guideTabsScroll: HorizontalScrollView
     private lateinit var guideSearch: EditText
     private lateinit var appsGrid: RecyclerView
+    private lateinit var homeScreen: View
+    private lateinit var homeRows: LinearLayout
+    private lateinit var homeClock: TextView
+    private lateinit var homeKicker: TextView
+    private lateinit var homeTitle: TextView
+    private lateinit var homeMeta: TextView
+    private lateinit var homeDesc: TextView
     private lateinit var appsAdapter: AppsAdapter
     private lateinit var trickBar: View
     private lateinit var trickIcon: TextView
@@ -108,6 +115,17 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var currentGroupIndex = 0
     private var visibleChannels: List<Channel> = emptyList()
     private var guideOpen = false
+
+    // Home page
+    private var homeOpen = false
+    private val homeLoader = Executors.newSingleThreadExecutor()
+    private var tmdbRows: List<Pair<String, List<HomeItem>>> = emptyList()
+    private var tmdbError: String? = null
+    private var tmdbLoadedAt = 0L
+    private var tmdbLoadedKey = ""
+    private var tmdbLoading = false
+    private val whereToWatch = HashMap<String, String>()
+    private var focusedHomeItem: HomeItem? = null
     private var guideChannels: List<Channel> = emptyList()
     private var guideListName = ""
     private var guideCategories: List<GuideTab> = emptyList()
@@ -184,6 +202,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         guideTabsScroll = findViewById(R.id.guide_tabs_scroll)
         guideSearch = findViewById(R.id.guide_search)
         appsGrid = findViewById(R.id.apps_grid)
+        homeScreen = findViewById(R.id.home_screen)
+        homeRows = findViewById(R.id.home_rows)
+        homeClock = findViewById(R.id.home_clock)
+        homeKicker = findViewById(R.id.home_hero_kicker)
+        homeTitle = findViewById(R.id.home_hero_title)
+        homeMeta = findViewById(R.id.home_hero_meta)
+        homeDesc = findViewById(R.id.home_hero_desc)
         appsAdapter = AppsAdapter(object : AppsAdapter.Listener {
             override fun onAppClick(app: TvApp) {
                 if (app.packageName == AppsRepository.SEARCH_TILE) {
@@ -328,6 +353,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     override fun onResume() {
         super.onResume()
+        if (homeOpen) {
+            buildHomeRows(focusFirst = false)
+            maybeLoadTmdb()
+        }
         when {
             prefs.settingsVersion != loadedSettingsVersion -> {
                 loadedSettingsVersion = prefs.settingsVersion
@@ -345,6 +374,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     override fun onDestroy() {
         super.onDestroy()
+        homeLoader.shutdownNow()
         checkGeneration++
         handler.removeCallbacksAndMessages(null)
         loader.shutdownNow()
@@ -404,7 +434,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         if (allChannels.isEmpty()) {
             emptyText.setText(R.string.no_channels)
-            showOverlay()
+            openHome()
         } else if (currentChannel == null) {
             val last = prefs.lastChannel
             val matches = { c: Channel -> c.id == last || (last != null && c.hasUrl(setOf(last))) }
@@ -417,10 +447,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 selectGroup(groupIndex)
                 val list = groups[groupIndex].channels
                 playChannel(list, list.indexOfFirst(matches))
-                hideOverlay()
-            } else {
-                showOverlay()
             }
+            openHome()
         } else {
             // Settings changed or Refresh pressed while watching: keep playing,
             // but point at the updated version of the channel.
@@ -638,6 +666,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         rebuildGroups(keepSelection = true)
         if (guideOpen) rebuildGuideTabs(keepPosition = true)
+        if (homeOpen) buildHomeRows(focusFirst = false)
         if (overlay.visibility != View.VISIBLE) return
         when {
             channelRow != null -> {
@@ -890,7 +919,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun time(millis: Long): String = timeFormat.format(Date(millis))
 
     private fun showBanner(channel: Channel, status: String?) {
-        if (guideOpen) return
+        if (guideOpen || homeOpen) return
         bannerNumber.text = if (playingIndex >= 0) (playingIndex + 1).toString() else ""
         bannerName.text = channel.name
 
@@ -932,7 +961,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
     }
 
-    private enum class TabKind { FAVOURITES, ALL, RECENT, SEARCH, APPS, LISTED, CATEGORY, SETTINGS }
+    private enum class TabKind { HOME, FAVOURITES, ALL, RECENT, SEARCH, APPS, LISTED, CATEGORY, SETTINGS }
 
     private class GuideTab(val kind: TabKind, val label: String, val channels: List<Channel>) {
         val key: String get() = "$kind:$label"
@@ -945,20 +974,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
      * first), and every channel from your ticked countries A to Z underneath.
      */
     private fun openGuide() {
+        if (homeOpen) closeHome()
         if (!guideOpen) {
             guideOpen = true
             overlay.visibility = View.GONE
             banner.visibility = View.GONE
             guideScreen.visibility = View.VISIBLE
-
-            // Shrink the live picture into the top-right corner.
-            val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
-            params.width = resources.getDimensionPixelSize(R.dimen.guide_preview_width)
-            params.height = resources.getDimensionPixelSize(R.dimen.guide_preview_height)
-            params.gravity = android.view.Gravity.TOP or android.view.Gravity.END
-            params.topMargin = resources.getDimensionPixelSize(R.dimen.guide_preview_top)
-            params.marginEnd = resources.getDimensionPixelSize(R.dimen.guide_preview_end)
-            playerView.layoutParams = params
+            setPlayerPreview(true)
 
             handler.removeCallbacks(guideTick)
             handler.postDelayed(guideTick, 60_000L)
@@ -981,12 +1003,283 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         handler.removeCallbacks(guideTick)
         hideKeyboard(guideSearch)
         guideScreen.visibility = View.GONE
+        setPlayerPreview(false)
+    }
+
+    /** Shrinks the live picture into the top-right corner (guide and home), or back to full screen. */
+    private fun setPlayerPreview(on: Boolean) {
         val params = playerView.layoutParams as android.widget.FrameLayout.LayoutParams
-        params.width = ViewGroup.LayoutParams.MATCH_PARENT
-        params.height = ViewGroup.LayoutParams.MATCH_PARENT
-        params.topMargin = 0
-        params.marginEnd = 0
+        if (on) {
+            params.width = resources.getDimensionPixelSize(R.dimen.guide_preview_width)
+            params.height = resources.getDimensionPixelSize(R.dimen.guide_preview_height)
+            params.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+            params.topMargin = resources.getDimensionPixelSize(R.dimen.guide_preview_top)
+            params.marginEnd = resources.getDimensionPixelSize(R.dimen.guide_preview_end)
+        } else {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT
+            params.topMargin = 0
+            params.marginEnd = 0
+        }
         playerView.layoutParams = params
+    }
+
+    // ---------------------------------------------------------------- home page
+
+    private val homeClockTick = object : Runnable {
+        override fun run() {
+            homeClock.text = time(System.currentTimeMillis())
+            handler.postDelayed(this, 20_000L)
+        }
+    }
+
+    private val homeListener = object : HomeRowAdapter.Listener {
+        override fun onHomeClick(item: HomeItem) = homeClick(item)
+        override fun onHomeFocus(item: HomeItem) = showHomeHero(item)
+    }
+
+    /** The overview page: what you were watching, favourites, apps, and films. */
+    private fun openHome() {
+        if (guideOpen) closeGuide()
+        homeOpen = true
+        overlay.visibility = View.GONE
+        banner.visibility = View.GONE
+        homeScreen.visibility = View.VISIBLE
+        setPlayerPreview(true)
+        handler.removeCallbacks(homeClockTick)
+        handler.post(homeClockTick)
+        buildHomeRows(focusFirst = true)
+        maybeLoadTmdb()
+    }
+
+    private fun closeHome() {
+        if (!homeOpen) return
+        homeOpen = false
+        handler.removeCallbacks(homeClockTick)
+        homeScreen.visibility = View.GONE
+        if (!guideOpen) setPlayerPreview(false)
+    }
+
+    private fun buildHomeRows(focusFirst: Boolean) {
+        // Remember where the highlight is, to put it back after rebuilding.
+        val focus = currentFocus
+        var keepRow = -1
+        var keepPos = 0
+        if (!focusFirst && focus != null) {
+            for (i in 0 until homeRows.childCount) {
+                val list = homeRows.getChildAt(i) as? RecyclerView ?: continue
+                val tile = list.findContainingItemView(focus) ?: continue
+                keepRow = i
+                keepPos = list.getChildAdapterPosition(tile)
+            }
+        }
+
+        homeRows.removeAllViews()
+        val shown = shownChannels()
+        val byId = shown.associateBy { it.id }
+        val rows = ArrayList<Pair<String, List<HomeItem>>>()
+
+        rows.add(
+            getString(R.string.home_row_quick) to listOf(
+                HomeItem.Action(HomeItem.Action.Kind.GUIDE, getString(R.string.home_action_guide), getString(R.string.home_action_guide_desc)),
+                HomeItem.Action(HomeItem.Action.Kind.SEARCH, getString(R.string.home_action_search), getString(R.string.search_tile_desc)),
+                HomeItem.Action(HomeItem.Action.Kind.SETTINGS, getString(R.string.home_action_settings), getString(R.string.home_action_settings_desc)),
+            )
+        )
+        val recent = (listOfNotNull(currentChannel) + prefs.recent.mapNotNull { byId[it] })
+            .distinctBy { it.id }.take(15)
+        if (recent.isNotEmpty()) rows.add(getString(R.string.home_row_continue) to recent.map { HomeItem.Live(it, recent) })
+        val favs = shown.filter { isFavourite(it) }.sortedBy { it.name.lowercase() }
+        if (favs.isNotEmpty()) rows.add(getString(R.string.home_row_favourites) to favs.map { HomeItem.Live(it, favs) })
+        if (prefs.appsTab) {
+            val apps = listOf(TvApp(AppsRepository.SEARCH_TILE, getString(R.string.search_tile))) +
+                AppsRepository.chosenApps(this, prefs)
+            rows.add(getString(R.string.home_row_apps) to apps.map { HomeItem.App(it) })
+        }
+        rows.addAll(tmdbRows)
+
+        for ((title, items) in rows) {
+            if (items.isEmpty()) continue
+            addHomeRowHeader(title)
+            val list = RecyclerView(this)
+            list.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+            list.adapter = HomeRowAdapter(items, homeListener) { ch ->
+                guide.current(ch, System.currentTimeMillis())?.let { getString(R.string.now_short, it.title) }
+            }
+            list.itemAnimator = null
+            list.clipToPadding = false
+            val side = dp(48)
+            list.setPadding(side, 0, side, 0)
+            homeRows.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+
+        // A note in place of the film rows, when there's no key or they couldn't load.
+        val note = when {
+            Tmdb.key(prefs).isEmpty() -> getString(R.string.home_tmdb_needed)
+            tmdbRows.isEmpty() && tmdbError != null -> tmdbError
+            tmdbRows.isNotEmpty() -> getString(R.string.home_credit)
+            else -> null
+        }
+        if (note != null) {
+            val text = TextView(this)
+            text.text = note
+            text.setTextColor(0xFFB4BCC8.toInt())
+            text.textSize = 13f
+            text.setPadding(dp(48), dp(16), dp(48), 0)
+            homeRows.addView(text)
+        }
+
+        // Highlight: back where it was, or the first channel to carry on with.
+        val targetRow = if (keepRow >= 0) keepRow else {
+            val lists = (0 until homeRows.childCount).filter { homeRows.getChildAt(it) is RecyclerView }
+            lists.getOrNull(1) ?: lists.firstOrNull() ?: -1
+        }
+        (homeRows.getChildAt(targetRow) as? RecyclerView)?.let { requestFocusAt(it, keepPos.coerceAtLeast(0), 0) }
+        if (focusFirst) homeScroll().post { homeScroll().scrollTo(0, 0) }
+    }
+
+    private fun homeScroll(): android.widget.ScrollView = findViewById(R.id.home_scroll)
+
+    private fun addHomeRowHeader(title: String) {
+        val header = TextView(this)
+        header.text = title
+        header.setTextColor(0xFFFFFFFF.toInt())
+        header.textSize = 18f
+        header.setTypeface(header.typeface, android.graphics.Typeface.BOLD)
+        header.setPadding(dp(48), dp(14), dp(48), dp(6))
+        homeRows.addView(header)
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun showHomeHero(item: HomeItem) {
+        focusedHomeItem = item
+        when (item) {
+            is HomeItem.Live -> {
+                val now = System.currentTimeMillis()
+                val programme = guide.current(item.channel, now)
+                homeKicker.text = getString(R.string.home_kicker_live)
+                homeTitle.text = item.channel.name
+                homeMeta.text = programme?.let {
+                    getString(R.string.guide_time_now, time(it.start), time(it.stop), ((it.stop - now) / 60_000L).toInt().coerceAtLeast(1)) +
+                        "  ·  " + it.title
+                } ?: item.channel.groups.joinToString(", ")
+                homeDesc.text = programme?.description.orEmpty()
+            }
+            is HomeItem.App -> {
+                homeKicker.text = getString(R.string.home_kicker_app)
+                homeTitle.text = item.app.label
+                homeMeta.setText(R.string.apps_open)
+                homeDesc.setText(
+                    if (item.app.packageName == AppsRepository.SEARCH_TILE) R.string.search_tile_desc else R.string.apps_desc
+                )
+            }
+            is HomeItem.Action -> {
+                homeKicker.text = ""
+                homeTitle.text = item.label
+                homeMeta.text = ""
+                homeDesc.text = item.description
+            }
+            is HomeItem.Film -> {
+                val t = item.title
+                homeKicker.setText(if (t.isMovie) R.string.home_kicker_film else R.string.home_kicker_series)
+                homeTitle.text = t.name
+                showFilmMeta(t)
+                homeDesc.text = listOf(t.overview, getString(R.string.home_film_desc_suffix))
+                    .filter { it.isNotBlank() }.joinToString(" ")
+                val cacheKey = "${t.isMovie}:${t.id}"
+                if (!whereToWatch.containsKey(cacheKey)) {
+                    val key = Tmdb.key(prefs)
+                    homeLoader.execute {
+                        val where = runCatching { Tmdb.whereToWatch(key, t) }.getOrNull()?.joinToString(", ").orEmpty()
+                        handler.post {
+                            whereToWatch[cacheKey] = where
+                            if ((focusedHomeItem as? HomeItem.Film)?.title == t) showFilmMeta(t)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showFilmMeta(t: Title) {
+        val parts = ArrayList<String>()
+        t.year?.let { parts.add(it) }
+        if (t.rating > 0) parts.add(getString(R.string.home_rating, t.rating))
+        whereToWatch["${t.isMovie}:${t.id}"]?.takeIf { it.isNotEmpty() }?.let { parts.add(getString(R.string.home_on, it)) }
+        homeMeta.text = parts.joinToString("  ·  ")
+    }
+
+    private fun homeClick(item: HomeItem) {
+        when (item) {
+            is HomeItem.Live -> {
+                closeHome()
+                if (item.channel.id == currentChannel?.id) {
+                    showBanner(item.channel, null)
+                } else {
+                    playChannel(item.list, item.list.indexOfFirst { it.id == item.channel.id }.coerceAtLeast(0))
+                }
+            }
+            is HomeItem.App -> {
+                val ok = if (item.app.packageName == AppsRepository.SEARCH_TILE) {
+                    AppsRepository.searchFilmsAndShows(this, "")
+                } else {
+                    AppsRepository.launch(this, item.app)
+                }
+                if (!ok) toast(getString(R.string.app_wont_open, item.app.label))
+            }
+            is HomeItem.Film -> {
+                if (!AppsRepository.searchFilmsAndShows(this, item.title.name)) toast(getString(R.string.search_unavailable))
+            }
+            is HomeItem.Action -> when (item.kind) {
+                HomeItem.Action.Kind.GUIDE -> openGuide()
+                HomeItem.Action.Kind.SEARCH ->
+                    if (!AppsRepository.searchFilmsAndShows(this, "")) toast(getString(R.string.search_unavailable))
+                HomeItem.Action.Kind.SETTINGS -> startActivity(Intent(this, SettingsActivity::class.java))
+            }
+        }
+    }
+
+    /** Fetches the film and series rows from TMDB (at most every few hours). */
+    private fun maybeLoadTmdb() {
+        val key = Tmdb.key(prefs)
+        if (key.isEmpty()) {
+            tmdbRows = emptyList()
+            return
+        }
+        val fresh = key == tmdbLoadedKey && System.currentTimeMillis() - tmdbLoadedAt < 3L * 60 * 60 * 1000
+        if (fresh || tmdbLoading) return
+        tmdbLoading = true
+        val apps = AppsRepository.chosenApps(this, prefs)
+        val labelTrendingFilms = getString(R.string.home_row_trending_films)
+        val labelTrendingSeries = getString(R.string.home_row_trending_series)
+        homeLoader.execute {
+            val rows = ArrayList<Pair<String, List<HomeItem>>>()
+            var error: String? = null
+            try {
+                rows.add(labelTrendingFilms to Tmdb.trending(key, movies = true).map { HomeItem.Film(it) })
+                rows.add(labelTrendingSeries to Tmdb.trending(key, movies = false).map { HomeItem.Film(it) })
+                val providers = Tmdb.providers(key)
+                val used = HashSet<Int>()
+                for (app in apps) {
+                    val provider = providers.filter { Tmdb.matches(it.name, app) }.minByOrNull { it.name.length } ?: continue
+                    if (!used.add(provider.id)) continue
+                    rows.add(getString(R.string.home_row_popular_on, app.label) to Tmdb.popularOn(key, provider.id).map { HomeItem.Film(it) })
+                    if (used.size >= 6) break
+                }
+            } catch (e: Exception) {
+                error = "Couldn't load films from TMDB: ${e.message ?: e.javaClass.simpleName}. Check the key in Settings."
+            }
+            handler.post {
+                tmdbLoading = false
+                if (isDestroyed) return@post
+                tmdbRows = rows
+                tmdbError = error
+                tmdbLoadedAt = if (error == null) System.currentTimeMillis() else 0L
+                tmdbLoadedKey = key
+                if (homeOpen) buildHomeRows(focusFirst = false)
+            }
+        }
     }
 
     /** All the channels the picker can show: your ticked countries, A to Z. */
@@ -1035,6 +1328,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         // The menu row: the handy ones first, then the channel lists and categories.
         val tabs = ArrayList<GuideTab>()
+        tabs.add(GuideTab(TabKind.HOME, getString(R.string.guide_tab_home), emptyList()))
         tabs.add(GuideTab(TabKind.SETTINGS, getString(R.string.guide_tab_settings), emptyList()))
         val favs = base.filter { isFavourite(it) }
         tabs.add(GuideTab(TabKind.FAVOURITES, getString(R.string.guide_tab_favourites), favs))
@@ -1064,7 +1358,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         val padV = (6 * resources.displayMetrics.density).toInt()
         for (tab in tabs) {
             val view = TextView(this)
-            val showCount = tab.kind != TabKind.SEARCH && tab.kind != TabKind.SETTINGS && tab.kind != TabKind.APPS
+            val showCount = tab.kind == TabKind.FAVOURITES || tab.kind == TabKind.ALL || tab.kind == TabKind.RECENT ||
+                tab.kind == TabKind.LISTED || tab.kind == TabKind.CATEGORY
             view.text = if (showCount) "${tab.label}  ${tab.channels.size}" else tab.label
             view.setTextColor(0xFFFFFFFF.toInt())
             view.textSize = 15f
@@ -1119,6 +1414,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
                 guideTitle.setText(R.string.guide_settings_title)
                 guideDesc.setText(R.string.guide_settings_desc)
             }
+            TabKind.HOME -> {
+                guideTitle.setText(R.string.guide_tab_home)
+                guideDesc.setText(R.string.home_tab_desc)
+            }
             TabKind.FAVOURITES -> {
                 guideTitle.setText(R.string.guide_no_favourites)
                 guideDesc.setText(R.string.guide_no_favourites_desc)
@@ -1171,6 +1470,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     /** OK (or ▼) on a tab. */
     private fun enterGuideTab(viaOk: Boolean) {
         when (currentGuideTab()?.kind) {
+            TabKind.HOME -> if (viaOk) openHome()
             TabKind.SETTINGS -> if (viaOk) startActivity(Intent(this, SettingsActivity::class.java))
             TabKind.SEARCH -> {
                 setGuideTabsFocused(false)
@@ -1415,7 +1715,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     /** Close the guide back to the picture; with nothing playing, Back twice exits. */
     private fun leaveGuide() {
         if (currentChannel == null) {
-            confirmExit()
+            openHome()
             return
         }
         closeGuide()
@@ -1698,6 +1998,27 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             }
         }
 
+        if (homeOpen) {
+            // Keep ◀ ▶ inside each row instead of jumping to another row at the ends.
+            val focusNow = currentFocus
+            if (focusNow != null && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                for (i in 0 until homeRows.childCount) {
+                    val list = homeRows.getChildAt(i) as? RecyclerView ?: continue
+                    val tile = list.findContainingItemView(focusNow) ?: continue
+                    val pos = list.getChildAdapterPosition(tile)
+                    val count = list.adapter?.itemCount ?: 0
+                    if ((code == KeyEvent.KEYCODE_DPAD_LEFT && pos <= 0) ||
+                        (code == KeyEvent.KEYCODE_DPAD_RIGHT && pos >= count - 1)
+                    ) return true
+                }
+            }
+            if (code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_PROG_YELLOW) {
+                (focusedHomeItem as? HomeItem.Live)?.let { toggleFavourite(it.channel) }
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
+
         if (overlayVisible) {
             val inChannels = channelRow != null
             val inGroups = groupRow != null
@@ -1781,10 +2102,14 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     /** Guide button: open the full-screen guide, or close it if it's showing. */
     private fun pressGuide() {
-        if (guideOpen) leaveGuide() else openGuide()
+        if (guideOpen) leaveGuide() else openGuide()   // openGuide also closes the home page
     }
 
     private fun handleBack() {
+        if (homeOpen) {
+            confirmExit()
+            return
+        }
         if (guideOpen) {
             // Back from the channels (or the search box) goes up to the menu row first.
             if (!guideTabsFocused) {
@@ -1807,6 +2132,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         }
         if (overlayVisible && currentChannel != null) {
             hideOverlay() // back to the picture
+            return
+        }
+        // Watching full screen: Back goes to the home page.
+        if (!overlayVisible) {
+            openHome()
             return
         }
         if (now - lastBackPress < 2_000) {
