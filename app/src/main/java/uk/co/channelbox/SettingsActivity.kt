@@ -66,9 +66,29 @@ class SettingsActivity : Activity() {
             container.addView(box, params)
             countryBoxes.add(name to box)
         }
+        // The full list is long, so it starts collapsed to just the ticked countries.
+        val toggle = findViewById<Button>(R.id.countries_toggle)
+        var expanded = false
+        fun updateCountryRows() {
+            for ((_, box) in countryBoxes) {
+                box.visibility = if (expanded || box.isChecked) View.VISIBLE else View.GONE
+            }
+            toggle.text = if (expanded) {
+                getString(R.string.countries_show_ticked)
+            } else {
+                getString(R.string.countries_show_all, countryBoxes.size)
+            }
+        }
+        toggle.setOnClickListener {
+            expanded = !expanded
+            updateCountryRows()
+        }
+        updateCountryRows()
+
         fun updateCountryVisibility() {
-            container.visibility =
-                if ((iptvOrg.isChecked || freeTv.isChecked) && !allCountries.isChecked) View.VISIBLE else View.GONE
+            val show = (iptvOrg.isChecked || freeTv.isChecked) && !allCountries.isChecked
+            container.visibility = if (show) View.VISIBLE else View.GONE
+            toggle.visibility = if (show) View.VISIBLE else View.GONE
             allCountries.visibility = if (iptvOrg.isChecked || freeTv.isChecked) View.VISIBLE else View.GONE
         }
         updateCountryVisibility()

@@ -141,6 +141,14 @@
             android:textColor="@color/white"
             android:textSize="18sp" />
 
+        <Button
+            android:id="@+id/countries_toggle"
+            style="@style/TvButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:minWidth="220dp" />
+
         <LinearLayout
             android:id="@+id/country_container"
             android:layout_width="match_parent"
