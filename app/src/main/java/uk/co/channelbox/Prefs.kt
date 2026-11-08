@@ -25,6 +25,11 @@ class Prefs(context: Context) {
         get() = sp.getStringSet(KEY_COUNTRIES, null)?.toSet() ?: DEFAULT_COUNTRIES
         set(value) = sp.edit().putStringSet(KEY_COUNTRIES, HashSet(value)).apply()
 
+    /** Use the playlist link below (it's kept even when switched off). */
+    var customEnabled: Boolean
+        get() = sp.getBoolean(KEY_CUSTOM_ENABLED, true)
+        set(value) = sp.edit().putBoolean(KEY_CUSTOM_ENABLED, value).apply()
+
     var customUrl: String
         get() = sp.getString(KEY_CUSTOM_URL, "") ?: ""
         set(value) = sp.edit().putString(KEY_CUSTOM_URL, value.trim()).apply()
@@ -68,6 +73,7 @@ class Prefs(context: Context) {
         private const val KEY_FREE_TV = "free_tv"
         private const val KEY_COUNTRIES = "countries"
         private const val KEY_CUSTOM_URL = "custom_url"
+        private const val KEY_CUSTOM_ENABLED = "custom_enabled"
         private const val KEY_FAVOURITES = "favourites"
         private const val KEY_RECENT = "recent"
         private const val KEY_LAST_CHANNEL = "last_channel"

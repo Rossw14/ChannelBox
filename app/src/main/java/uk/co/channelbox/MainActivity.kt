@@ -984,13 +984,15 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         val base = guideBaseChannels()
         val byId = base.associateBy { it.id }
 
+        // The menu row: the handy ones first, then the channel lists and categories.
         val tabs = ArrayList<GuideTab>()
+        tabs.add(GuideTab(TabKind.SETTINGS, getString(R.string.guide_tab_settings), emptyList()))
         val favs = base.filter { isFavourite(it) }
-        if (favs.isNotEmpty()) tabs.add(GuideTab(TabKind.FAVOURITES, getString(R.string.guide_tab_favourites), favs))
-        tabs.add(GuideTab(TabKind.ALL, getString(R.string.guide_tab_all), base))
+        tabs.add(GuideTab(TabKind.FAVOURITES, getString(R.string.guide_tab_favourites), favs))
+        tabs.add(GuideTab(TabKind.SEARCH, getString(R.string.guide_tab_search), searchIn(base, guideSearchQuery)))
         val recent = prefs.recent.mapNotNull { byId[it] }
         if (recent.isNotEmpty()) tabs.add(GuideTab(TabKind.RECENT, getString(R.string.guide_tab_recent), recent))
-        tabs.add(GuideTab(TabKind.SEARCH, getString(R.string.guide_tab_search), searchIn(base, guideSearchQuery)))
+        tabs.add(GuideTab(TabKind.ALL, getString(R.string.guide_tab_all), base))
         val listed = base.filter { guide.programmes(it).isNotEmpty() }
         if (listed.isNotEmpty() && listed.size < base.size) {
             tabs.add(GuideTab(TabKind.LISTED, getString(R.string.guide_tab_listed), listed))
@@ -1000,7 +1002,6 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         byCategory.entries
             .sortedWith(compareBy<Map.Entry<String, MutableList<Channel>>>({ it.key == M3uParser.OTHER }, { -it.value.size }))
             .forEach { tabs.add(GuideTab(TabKind.CATEGORY, it.key, it.value)) }
-        tabs.add(GuideTab(TabKind.SETTINGS, getString(R.string.guide_tab_settings), emptyList()))
         guideCategories = tabs
 
         guideTabs.removeAllViews()
@@ -1021,7 +1022,9 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             guideTabs.addView(view, params)
         }
 
-        val index = tabs.indexOfFirst { it.key == previousKey }.takeIf { it >= 0 } ?: 0
+        // Land on the last tab used; first time, Favourites if you have any, otherwise All channels.
+        val index = tabs.indexOfFirst { it.key == previousKey }.takeIf { it >= 0 }
+            ?: tabs.indexOfFirst { it.kind == (if (favs.isNotEmpty()) TabKind.FAVOURITES else TabKind.ALL) }
         applyGuideCategory(index, focusedId)
     }
 
@@ -1046,6 +1049,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             TabKind.SETTINGS -> {
                 guideTitle.setText(R.string.guide_settings_title)
                 guideDesc.setText(R.string.guide_settings_desc)
+            }
+            TabKind.FAVOURITES -> {
+                guideTitle.setText(R.string.guide_no_favourites)
+                guideDesc.setText(R.string.guide_no_favourites_desc)
             }
             TabKind.SEARCH -> {
                 guideTitle.text = if (guideSearchQuery.isBlank()) {
@@ -1680,6 +1687,13 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
     private fun handleBack() {
         if (guideOpen) {
+            // Back from the channels (or the search box) goes up to the menu row first.
+            if (!guideTabsFocused) {
+                if (currentFocus === guideSearch) hideKeyboard(guideSearch)
+                epgGrid.requestFocus()
+                setGuideTabsFocused(true)
+                return
+            }
             leaveGuide()
             return
         }

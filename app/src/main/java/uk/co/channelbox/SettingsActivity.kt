@@ -109,8 +109,24 @@ class SettingsActivity : Activity() {
         val savedQuality = prefs.maxHeight
         qualityGroup.check(qualityOptions.firstOrNull { it.second == savedQuality }?.first ?: R.id.quality_auto)
 
+        val customEnabled = findViewById<CheckBox>(R.id.custom_enabled)
+        customEnabled.isChecked = prefs.customEnabled
+
         val urlField = findViewById<EditText>(R.id.custom_url)
         urlField.setText(prefs.customUrl)
+
+        findViewById<View>(R.id.only_mine_button).setOnClickListener {
+            if (urlField.text.toString().isBlank()) {
+                toast(getString(R.string.only_mine_needs_link))
+                urlField.requestFocus()
+                return@setOnClickListener
+            }
+            iptvOrg.isChecked = false
+            freeTv.isChecked = false
+            customEnabled.isChecked = true
+            toast(getString(R.string.only_mine_done))
+            findViewById<View>(R.id.save_button).requestFocus()
+        }
 
         findViewById<View>(R.id.save_button).setOnClickListener {
             val url = urlField.text.toString().trim()
@@ -120,7 +136,8 @@ class SettingsActivity : Activity() {
                 toast(getString(R.string.url_invalid))
                 return@setOnClickListener
             }
-            if (!iptvOrg.isChecked && !freeTv.isChecked && url.isEmpty()) {
+            val usingMine = customEnabled.isChecked && url.isNotEmpty()
+            if (!iptvOrg.isChecked && !freeTv.isChecked && !usingMine) {
                 toast(getString(R.string.need_a_source))
                 return@setOnClickListener
             }
@@ -133,6 +150,7 @@ class SettingsActivity : Activity() {
             prefs.allCountries = allCountries.isChecked
             if (chosen.isNotEmpty()) prefs.countries = chosen
             prefs.customUrl = url
+            prefs.customEnabled = customEnabled.isChecked
             prefs.hideOffline = hideOffline.isChecked
             prefs.maxHeight = qualityOptions.firstOrNull { it.first == qualityGroup.checkedRadioButtonId }?.second ?: 0
             prefs.settingsVersion = prefs.settingsVersion + 1

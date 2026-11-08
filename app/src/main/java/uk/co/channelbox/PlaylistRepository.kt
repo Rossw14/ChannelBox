@@ -39,7 +39,7 @@ object PlaylistRepository {
         val countryByUrl = HashMap<String, MutableSet<String>>()
 
         val custom = prefs.customUrl.trim()
-        if (custom.isNotEmpty()) {
+        if (prefs.customEnabled && custom.isNotEmpty()) {
             fetch(context, "custom", custom, "Your playlist", forceRefresh, errors)?.let { text ->
                 val parsed = M3uParser.parse(text)
                 entries.addAll(parsed.entries)

@@ -10,8 +10,8 @@ that in Settings. You can also add your own M3U playlist link.
 
 - A full-screen live player for HLS (`.m3u8`), DASH (`.mpd`) and plain stream links.
 - **A Sky-style channel picker.** Press OK while watching to open the guide page: tabs across the top
-  (★ Favourites first, then All channels, Recently watched, Search, With listings, each category, and
-  Settings), every channel from your ticked countries A to Z underneath with what's on, and the live
+  (⚙ Settings, ★ Favourites, 🔍 Search and 🕘 Recently watched first, then All channels, With listings and
+  each category). Back from the channels jumps up to that menu row, every channel from your ticked countries A to Z underneath with what's on, and the live
   picture carrying on in the top-right corner.
 - **Search** across every channel you've chosen, typed with the remote or the on-screen keyboard's mic.
 - Channel changing with ▲▼ or CH+/CH−, plus typed channel numbers.
@@ -67,7 +67,7 @@ that in Settings. You can also add your own M3U playlist link.
 | CH+ / CH− | Page up / down |
 | Number keys | Jump to that channel |
 | OK | Show that channel in the little picture; OK again to watch full screen |
-| Back or Guide | Close the guide |
+| Back | Up to the menu row; Back again closes the guide |
 
 ## Getting the app onto your TV
 
