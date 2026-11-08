@@ -27,6 +27,8 @@ class EpgGridView @JvmOverloads constructor(
         /** The highlight moved. [programme] is null where there are no listings. */
         fun onGuideFocus(row: Int, programme: Programme?, slotStart: Long)
         fun onGuideSelect(row: Int, programme: Programme?)
+        /** ▲ was pressed on the top row (used to reach the category tabs). */
+        fun onGuideTopEdge()
     }
 
     var listener: Listener? = null
@@ -38,7 +40,9 @@ class EpgGridView @JvmOverloads constructor(
         set(value) { field = value; invalidate() }
 
     // Layout sizes
-    private val channelColumn = dp(210f)
+    private val channelColumn = dp(260f)
+    private val logoWidth = dp(54f)
+    private val logoHeight = dp(34f)
     private val headerHeight = dp(30f)
     private val rowHeight = dp(50f)
     private val gap = dp(3f)
@@ -58,6 +62,9 @@ class EpgGridView @JvmOverloads constructor(
     private val smallPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = sp(14f); color = COLOR_DIM }
     private val numberPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = sp(15f); color = COLOR_DIM }
     private val rect = RectF()
+    private val logoRect = RectF()
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val logoReady = { invalidate() }
 
     init {
         isFocusable = true
@@ -122,6 +129,10 @@ class EpgGridView @JvmOverloads constructor(
 
     private fun moveRow(delta: Int) {
         if (channels.isEmpty()) return
+        if (delta < 0 && focusRow == 0) {
+            listener?.onGuideTopEdge()
+            return
+        }
         val target = (focusRow + delta).coerceIn(0, channels.size - 1)
         if (target == focusRow) return
         focusRow = target
@@ -223,7 +234,23 @@ class EpgGridView @JvmOverloads constructor(
             canvas.drawRoundRect(rect, radius, radius, fill)
             val numberText = (row + 1).toString()
             canvas.drawText(numberText, pad, centreY(top, bottom, numberPaint), numberPaint)
-            val nameLeft = pad + dp(40f)
+            // Logo (loaded in the background; the grid redraws when it arrives)
+            val logoLeft = pad + dp(36f)
+            val logoTop = (top + bottom - logoHeight) / 2
+            val logo = LogoLoader.cached(channel.logo)
+            if (logo == null) {
+                LogoLoader.request(channel.logo, logoReady)
+            } else {
+                val scale = minOf(logoWidth / logo.width, logoHeight / logo.height)
+                val w = logo.width * scale
+                val h = logo.height * scale
+                logoRect.set(
+                    logoLeft + (logoWidth - w) / 2, logoTop + (logoHeight - h) / 2,
+                    logoLeft + (logoWidth + w) / 2, logoTop + (logoHeight + h) / 2,
+                )
+                canvas.drawBitmap(logo, null, logoRect, bitmapPaint)
+            }
+            val nameLeft = logoLeft + logoWidth + dp(10f)
             titlePaint.color = if (channel.id == playingId) COLOR_ACCENT else Color.WHITE
             val name = TextUtils.ellipsize(channel.name, titlePaint, gridLeft - gap - nameLeft - pad, TextUtils.TruncateAt.END)
             canvas.drawText(name, 0, name.length, nameLeft, centreY(top, bottom, titlePaint), titlePaint)

@@ -38,7 +38,7 @@
     <string name="guide_not_set_up_long">The TV guide hasn\'t been set up for this copy of ChannelBox. See the README for the one-time GitHub step.</string>
     <string name="guide_failed_long">The TV guide couldn\'t be downloaded. If you\'ve only just set it up, the first guide can take up to an hour to appear. Choose Refresh to try again.</string>
     <string name="guide_no_info">No information</string>
-    <string name="guide_hint">OK: watch · ▲▼ channels · ◀▶ later / earlier · CH+/−: page · Numbers: jump to channel · Back or Guide: close</string>
+    <string name="guide_hint">OK: watch · ▲▼ channels · ◀▶ earlier / later · ▲ from the top or 🔴 🟢: categories · CH+/−: page · Back: close</string>
     <string name="guide_heading">TV GUIDE · %1$s</string>
     <string name="guide_channel_line">%1$d  %2$s</string>
     <string name="guide_no_listings">No listings for this channel</string>
@@ -47,6 +47,35 @@
     <string name="guide_time_day">%1$s %2$s – %3$s</string>
     <string name="guide_empty">There are no channels in this list.</string>
     <string name="no_guide_for_channel">No listings for this channel.</string>
+
+    <string name="guide_tab_all">All</string>
+    <string name="guide_tab_listed">With listings</string>
+    <string name="guide_heading_category">TV GUIDE · %1$s · %2$s</string>
+
+    <string name="stalled_switching">The picture stalled, so trying stream %1$d of %2$d…</string>
+    <string name="stalled_no_backup">This channel is struggling. If it keeps happening, try a lower picture quality in Settings.</string>
+
+    <string name="trick_live">Live</string>
+    <string name="trick_paused">Paused</string>
+    <string name="trick_behind">%1$s behind live</string>
+    <string name="trick_paused_behind">Paused · %1$s behind live</string>
+    <string name="trick_range">can go back up to %1$s</string>
+    <string name="trick_cant_rewind">This channel can\'t be paused or rewound — it doesn\'t keep any past video.</string>
+    <string name="trick_hint">⏯ pause / play · ⏪ ⏩ 15 seconds · ⏮ ⏭ 1 minute · ⏹ back to live</string>
+    <string name="back_to_live_paused_too_long">You were paused longer than this channel allows, so it\'s gone back to live.</string>
+
+    <string name="opt_add_fav">★ Add to Favourites</string>
+    <string name="opt_remove_fav">★ Remove from Favourites</string>
+    <string name="opt_sound">🔊 Sound: %1$s</string>
+    <string name="opt_subtitles">💬 Subtitles: %1$s</string>
+    <string name="opt_default">Default</string>
+    <string name="subtitles_off">Off</string>
+    <string name="track_n">Track %1$d</string>
+    <string name="subtitle_n">Subtitles %1$d</string>
+    <string name="choose_sound">Sound</string>
+    <string name="choose_subtitles">Subtitles</string>
+    <string name="no_sound_choices">This channel only has one soundtrack.</string>
+    <string name="no_subtitles">This channel doesn\'t have subtitles.</string>
 
     <string name="fav_added">Added %1$s to Favourites</string>
     <string name="fav_removed">Removed %1$s from Favourites</string>

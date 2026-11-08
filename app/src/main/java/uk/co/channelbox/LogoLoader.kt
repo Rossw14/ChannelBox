@@ -47,6 +47,27 @@ object LogoLoader {
         }
     }
 
+    private val pending: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
+    /** A logo that's already loaded, or null. Used by the TV guide grid. */
+    fun cached(url: String?): Bitmap? = if (url.isNullOrBlank()) null else cache.get(url)
+
+    /** Starts loading a logo in the background and calls [onReady] when it arrives. */
+    fun request(url: String?, onReady: () -> Unit) {
+        if (url.isNullOrBlank() || failed.contains(url) || cache.get(url) != null) return
+        if (!pending.add(url)) return
+        pool.execute {
+            val bitmap = try {
+                decode(Net.get(url, maxBytes = 3 * 1024 * 1024))
+            } catch (e: Exception) {
+                null
+            }
+            pending.remove(url)
+            if (bitmap == null) failed.add(url) else cache.put(url, bitmap)
+            if (bitmap != null) main.post { onReady() }
+        }
+    }
+
     private fun decode(bytes: ByteArray): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)

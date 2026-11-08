@@ -1,6 +1,7 @@
 package uk.co.channelbox
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -14,14 +15,20 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -32,6 +39,7 @@ import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener {
@@ -56,6 +64,12 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private lateinit var guideTitle: TextView
     private lateinit var guideTime: TextView
     private lateinit var guideDesc: TextView
+    private lateinit var guideTabs: LinearLayout
+    private lateinit var guideTabsScroll: HorizontalScrollView
+    private lateinit var trickBar: View
+    private lateinit var trickIcon: TextView
+    private lateinit var trickText: TextView
+    private lateinit var trickProgress: ProgressBar
     private lateinit var banner: View
     private lateinit var bannerNumber: TextView
     private lateinit var bannerName: TextView
@@ -91,6 +105,15 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private var visibleChannels: List<Channel> = emptyList()
     private var guideOpen = false
     private var guideChannels: List<Channel> = emptyList()
+    private var guideListName = ""
+    private var guideCategories: List<Pair<String, List<Channel>>> = emptyList()
+    private var guideCategoryIndex = 0
+    private var guideTabsFocused = false
+
+    // Pause / rewind
+    private var liveBaselineMs = C.TIME_UNSET
+    private var captureLiveBaseline = true
+    private var timeshifted = false
     /** null = the top level (countries); otherwise the country being browsed. */
     private var browseCountry: String? = null
     private var searchQuery = ""
@@ -115,6 +138,16 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private val hideBanner = Runnable { banner.visibility = View.GONE }
     private val commitDigits = Runnable { jumpToNumber() }
     private val searchRunnable = Runnable { runSearch() }
+    private val stallCheck = Runnable { onStalled() }
+    private val trickUpdater = object : Runnable {
+        override fun run() {
+            updateTrickBar()
+            if (trickBar.visibility == View.VISIBLE) handler.postDelayed(this, 1_000L)
+        }
+    }
+    private val hideTrickBar = Runnable {
+        if (player?.playWhenReady != false) trickBar.visibility = View.GONE
+    }
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -140,6 +173,12 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         guideTitle = findViewById(R.id.guide_title)
         guideTime = findViewById(R.id.guide_time)
         guideDesc = findViewById(R.id.guide_desc)
+        guideTabs = findViewById(R.id.guide_tabs)
+        guideTabsScroll = findViewById(R.id.guide_tabs_scroll)
+        trickBar = findViewById(R.id.trick_bar)
+        trickIcon = findViewById(R.id.trick_icon)
+        trickText = findViewById(R.id.trick_text)
+        trickProgress = findViewById(R.id.trick_progress)
         banner = findViewById(R.id.banner)
         bannerNumber = findViewById(R.id.banner_number)
         bannerName = findViewById(R.id.banner_name)
@@ -188,6 +227,10 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             override fun onGuideSelect(row: Int, programme: Programme?) {
                 closeGuide()
                 playChannel(guideChannels, row)
+            }
+
+            override fun onGuideTopEdge() {
+                if (guideCategories.size > 1) setGuideTabsFocused(true)
             }
         }
         findViewById<View>(R.id.guide_button).setOnClickListener { openGuide() }
@@ -609,7 +652,16 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         exo.playWhenReady = true
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                // If the picture sits buffering for too long, try the next stream.
+                handler.removeCallbacks(stallCheck)
+                if (playbackState == Player.STATE_BUFFERING && exo.playWhenReady) {
+                    handler.postDelayed(stallCheck, STALL_TIMEOUT_MS)
+                }
                 if (playbackState == Player.STATE_READY) {
+                    if (captureLiveBaseline && exo.isCurrentMediaItemLive) {
+                        liveBaselineMs = exo.currentLiveOffset
+                        captureLiveBaseline = false
+                    }
                     val stream = streamQueue.getOrNull(streamIndex) ?: return
                     if (health.record(stream.url, true)) channelAdapter.notifyDataSetChanged()
                     if (bannerStatus.visibility == View.VISIBLE) {
@@ -628,6 +680,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     }
 
     private fun releasePlayer() {
+        handler.removeCallbacks(stallCheck)
         playerView.player = null
         player?.release()
         player = null
@@ -677,6 +730,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
 
         val source = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
             .createMediaSource(item.build())
+        captureLiveBaseline = true
+        liveBaselineMs = C.TIME_UNSET
+        timeshifted = false
+        handler.removeCallbacks(stallCheck)
+        trickBar.visibility = View.GONE
         exo.setMediaSource(source)
         exo.prepare()
         exo.play()
@@ -699,8 +757,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         val stream = streamQueue.getOrNull(streamIndex) ?: return
 
         if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+            if (timeshifted) showBanner(channel, getString(R.string.back_to_live_paused_too_long))
+            timeshifted = false
             exo.seekToDefaultPosition()
             exo.prepare()
+            exo.play()
             return
         }
         // Some links don't say they're HLS; try that once before moving on.
@@ -759,6 +820,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     private fun time(millis: Long): String = timeFormat.format(Date(millis))
 
     private fun showBanner(channel: Channel, status: String?) {
+        if (guideOpen) return
         bannerNumber.text = if (playingIndex >= 0) (playingIndex + 1).toString() else ""
         bannerName.text = channel.name
 
@@ -810,20 +872,18 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     /** Opens the full-screen guide for the list chosen on the left (e.g. UK channels). */
     private fun openGuide() {
         val group = groups.getOrNull(currentGroupIndex)
-        guideChannels = when {
-            visibleChannels.isNotEmpty() -> visibleChannels
-            else -> shownChannels()
-        }
-        if (guideChannels.isEmpty()) {
+        val base = if (visibleChannels.isNotEmpty()) visibleChannels else shownChannels()
+        if (base.isEmpty()) {
             toast(getString(R.string.guide_empty))
             return
         }
-        val listName = when {
+        guideListName = when {
             group == null -> getString(R.string.all_channels)
             group.kind == Group.Kind.BACK -> browseCountry.orEmpty()
             else -> group.label
         }
-        guideHeading.text = getString(R.string.guide_heading, listName)
+        buildGuideCategories(base)
+        guideTabsFocused = false
 
         guideOpen = true
         overlay.visibility = View.GONE
@@ -839,9 +899,8 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         params.marginEnd = resources.getDimensionPixelSize(R.dimen.guide_preview_end)
         playerView.layoutParams = params
 
-        val startRow = guideChannels.indexOfFirst { it.id == currentChannel?.id }.coerceAtLeast(0)
         epgGrid.playingId = currentChannel?.id
-        epgGrid.setData(guideChannels, guide, startRow)
+        applyGuideCategory(0)
         epgGrid.requestFocus()
         handler.removeCallbacks(guideTick)
         handler.postDelayed(guideTick, 60_000L)
@@ -858,6 +917,294 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         params.topMargin = 0
         params.marginEnd = 0
         playerView.layoutParams = params
+    }
+
+    /** "All", "With listings", then the categories in this list (biggest first). */
+    private fun buildGuideCategories(base: List<Channel>) {
+        val cats = ArrayList<Pair<String, List<Channel>>>()
+        cats.add(Pair(getString(R.string.guide_tab_all), base))
+        val listed = base.filter { guide.programmes(it).isNotEmpty() }
+        if (listed.isNotEmpty() && listed.size < base.size) cats.add(Pair(getString(R.string.guide_tab_listed), listed))
+        val byCategory = LinkedHashMap<String, MutableList<Channel>>()
+        for (ch in base) for (g in ch.groups) byCategory.getOrPut(g) { ArrayList() }.add(ch)
+        if (byCategory.size > 1) {
+            byCategory.entries
+                .sortedWith(compareBy<Map.Entry<String, MutableList<Channel>>>({ it.key == M3uParser.OTHER }, { -it.value.size }))
+                .forEach { cats.add(Pair(it.key, it.value)) }
+        }
+        guideCategories = cats
+
+        guideTabs.removeAllViews()
+        val padH = (14 * resources.displayMetrics.density).toInt()
+        val padV = (6 * resources.displayMetrics.density).toInt()
+        for ((name, list) in cats) {
+            val tab = TextView(this)
+            tab.text = "$name  ${list.size}"
+            tab.setTextColor(0xFFFFFFFF.toInt())
+            tab.textSize = 15f
+            tab.setPadding(padH, padV, padH, padV)
+            tab.setBackgroundResource(R.drawable.tab_bg)
+            val params = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            params.marginEnd = padV
+            guideTabs.addView(tab, params)
+        }
+        guideTabsScroll.visibility = if (cats.size > 1) View.VISIBLE else View.GONE
+    }
+
+    private fun applyGuideCategory(index: Int) {
+        if (guideCategories.isEmpty()) return
+        guideCategoryIndex = index.mod(guideCategories.size)
+        val (name, list) = guideCategories[guideCategoryIndex]
+        guideChannels = list
+        guideHeading.text = if (guideCategoryIndex == 0) {
+            getString(R.string.guide_heading, guideListName)
+        } else {
+            getString(R.string.guide_heading_category, guideListName, name)
+        }
+        val startRow = list.indexOfFirst { it.id == currentChannel?.id }.coerceAtLeast(0)
+        epgGrid.setData(list, guide, startRow)
+        updateGuideTabs()
+    }
+
+    private fun setGuideTabsFocused(focused: Boolean) {
+        guideTabsFocused = focused
+        updateGuideTabs()
+    }
+
+    private fun updateGuideTabs() {
+        for (i in 0 until guideTabs.childCount) {
+            val tab = guideTabs.getChildAt(i)
+            tab.isActivated = i == guideCategoryIndex
+            tab.isSelected = guideTabsFocused && i == guideCategoryIndex
+        }
+        guideTabs.getChildAt(guideCategoryIndex)?.let { tab ->
+            guideTabsScroll.post { guideTabsScroll.smoothScrollTo((tab.left - tab.width).coerceAtLeast(0), 0) }
+        }
+    }
+
+    // ---------------------------------------------------------------- stalls, pause and rewind
+
+    private fun onStalled() {
+        val exo = player ?: return
+        val channel = currentChannel ?: return
+        if (exo.playbackState != Player.STATE_BUFFERING || !exo.playWhenReady) return
+        if (streamIndex + 1 < streamQueue.size) {
+            streamIndex++
+            triedHlsFallback = false
+            showBanner(channel, getString(R.string.stalled_switching, streamIndex + 1, streamQueue.size))
+            startPlayback(streamQueue[streamIndex], forceHls = false)
+        } else {
+            showBanner(channel, getString(R.string.stalled_no_backup))
+        }
+    }
+
+    private fun togglePause() {
+        val exo = player ?: return
+        if (currentChannel == null) return
+        if (exo.playWhenReady) {
+            if (!exo.isCurrentMediaItemSeekable && exo.isCurrentMediaItemLive) {
+                toast(getString(R.string.trick_cant_rewind))
+                return
+            }
+            exo.pause()
+            timeshifted = true
+        } else {
+            exo.play()
+        }
+        showTrickBar()
+    }
+
+    private fun seekBy(deltaMs: Long) {
+        val exo = player ?: return
+        if (currentChannel == null) return
+        if (!exo.isCurrentMediaItemSeekable) {
+            toast(getString(R.string.trick_cant_rewind))
+            return
+        }
+        val duration = exo.duration
+        var target = (exo.currentPosition + deltaMs).coerceAtLeast(0L)
+        if (duration != C.TIME_UNSET) {
+            // Fast-forwarding to within a few seconds of the end means "back to live".
+            if (exo.isCurrentMediaItemLive && deltaMs > 0 && target >= duration - LIVE_SNAP_MS) {
+                goLive()
+                return
+            }
+            target = target.coerceAtMost(duration)
+        }
+        exo.seekTo(target)
+        timeshifted = true
+        showTrickBar()
+    }
+
+    private fun goLive() {
+        val exo = player ?: return
+        exo.seekToDefaultPosition()
+        exo.play()
+        timeshifted = false
+        showTrickBar()
+    }
+
+    /** How far behind the live picture we are, in ms (0 when live or unknown). */
+    private fun behindLiveMs(): Long {
+        val exo = player ?: return 0
+        if (!exo.isCurrentMediaItemLive) return 0
+        val offset = exo.currentLiveOffset
+        if (offset == C.TIME_UNSET) return 0
+        val baseline = if (liveBaselineMs != C.TIME_UNSET) liveBaselineMs else 0L
+        return (offset - baseline).coerceAtLeast(0L)
+    }
+
+    private fun showTrickBar() {
+        trickBar.visibility = View.VISIBLE
+        handler.removeCallbacks(trickUpdater)
+        handler.removeCallbacks(hideTrickBar)
+        updateTrickBar()
+        handler.postDelayed(trickUpdater, 1_000L)
+        if (player?.playWhenReady != false) handler.postDelayed(hideTrickBar, 4_000L)
+    }
+
+    private fun updateTrickBar() {
+        val exo = player ?: return
+        val behind = behindLiveMs()
+        val isLive = behind < LIVE_SNAP_MS
+        val paused = !exo.playWhenReady
+        trickIcon.text = when {
+            paused -> "❚❚"
+            isLive -> "●"
+            else -> "▶"
+        }
+        trickIcon.setTextColor(if (!paused && isLive) 0xFFFF4D57.toInt() else 0xFFFFFFFF.toInt())
+        val parts = ArrayList<String>()
+        parts.add(
+            when {
+                paused && !isLive -> getString(R.string.trick_paused_behind, formatDuration(behind))
+                paused -> getString(R.string.trick_paused)
+                isLive -> getString(R.string.trick_live)
+                else -> getString(R.string.trick_behind, formatDuration(behind))
+            }
+        )
+        val duration = exo.duration
+        if (exo.isCurrentMediaItemSeekable && duration != C.TIME_UNSET && duration > 0) {
+            parts.add(getString(R.string.trick_range, formatDuration(duration)))
+            trickProgress.progress = ((exo.currentPosition * 1000) / duration).toInt().coerceIn(0, 1000)
+            trickProgress.visibility = View.VISIBLE
+        } else {
+            trickProgress.visibility = View.GONE
+        }
+        trickText.text = parts.joinToString("  ·  ")
+    }
+
+    private fun formatDuration(ms: Long): String {
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            String.format(Locale.UK, "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(Locale.UK, "%d:%02d", minutes, seconds)
+        }
+    }
+
+    // ---------------------------------------------------------------- sound and subtitles
+
+    private class TrackOption(val group: Tracks.Group, val index: Int, val label: String)
+
+    private fun trackOptions(type: Int): List<TrackOption> {
+        val exo = player ?: return emptyList()
+        val options = ArrayList<TrackOption>()
+        for (group in exo.currentTracks.groups) {
+            if (group.type != type) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                options.add(TrackOption(group, i, trackLabel(group.getTrackFormat(i), options.size + 1, type)))
+            }
+        }
+        return options
+    }
+
+    private fun trackLabel(format: Format, number: Int, type: Int): String {
+        val language = format.language
+            ?.takeIf { it.isNotBlank() && it != "und" }
+            ?.let { code -> Locale.forLanguageTag(code).displayLanguage.ifEmpty { code } }
+        val base = format.label?.takeIf { it.isNotBlank() }
+            ?: language
+            ?: getString(if (type == C.TRACK_TYPE_AUDIO) R.string.track_n else R.string.subtitle_n, number)
+        val surround = when {
+            type != C.TRACK_TYPE_AUDIO || format.channelCount <= 2 -> ""
+            format.channelCount == 6 -> " (5.1)"
+            else -> " (${format.channelCount} channels)"
+        }
+        return base + surround
+    }
+
+    private fun subtitlesOff(): Boolean =
+        player?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true
+
+    private fun currentTrackLabel(type: Int): String? {
+        if (type == C.TRACK_TYPE_TEXT && subtitlesOff()) return null
+        return trackOptions(type).firstOrNull { it.group.isTrackSelected(it.index) }?.label
+    }
+
+    /** Menu button while watching: favourite, sound and subtitles. */
+    private fun showOptions() {
+        val channel = currentChannel ?: return
+        val items = arrayOf(
+            getString(if (isFavourite(channel)) R.string.opt_remove_fav else R.string.opt_add_fav),
+            getString(R.string.opt_sound, currentTrackLabel(C.TRACK_TYPE_AUDIO) ?: getString(R.string.opt_default)),
+            getString(R.string.opt_subtitles, currentTrackLabel(C.TRACK_TYPE_TEXT) ?: getString(R.string.subtitles_off)),
+        )
+        AlertDialog.Builder(this)
+            .setTitle(channel.name)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> toggleFavourite(channel)
+                    1 -> chooseTrack(C.TRACK_TYPE_AUDIO)
+                    2 -> chooseTrack(C.TRACK_TYPE_TEXT)
+                }
+            }
+            .show()
+    }
+
+    private fun chooseTrack(type: Int) {
+        val exo = player ?: return
+        val options = trackOptions(type)
+        val isText = type == C.TRACK_TYPE_TEXT
+        if (options.isEmpty() || (!isText && options.size < 2)) {
+            toast(getString(if (isText) R.string.no_subtitles else R.string.no_sound_choices))
+            return
+        }
+        val labels = ArrayList<String>()
+        if (isText) labels.add(getString(R.string.subtitles_off))
+        labels.addAll(options.map { it.label })
+        val selected = options.indexOfFirst { it.group.isTrackSelected(it.index) }
+        val checked = when {
+            isText && (subtitlesOff() || selected < 0) -> 0
+            isText -> selected + 1
+            else -> selected.coerceAtLeast(0)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(if (isText) R.string.choose_subtitles else R.string.choose_sound)
+            .setSingleChoiceItems(labels.toTypedArray(), checked) { dialog, which ->
+                val builder = exo.trackSelectionParameters.buildUpon()
+                if (isText && which == 0) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                } else {
+                    val option = options[if (isText) which - 1 else which]
+                    builder.setTrackTypeDisabled(type, false)
+                        .setOverrideForType(TrackSelectionOverride(option.group.mediaTrackGroup, option.index))
+                    // Remember the language for other channels too.
+                    val language = option.group.getTrackFormat(option.index).language
+                    if (!language.isNullOrBlank() && language != "und") {
+                        if (isText) builder.setPreferredTextLanguage(language) else builder.setPreferredAudioLanguage(language)
+                    }
+                }
+                exo.trackSelectionParameters = builder.build()
+                dialog.dismiss()
+            }
+            .show()
     }
 
     /** Close the guide; if nothing is playing yet, go back to the channel list. */
@@ -1000,7 +1347,23 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
 
         if (guideOpen) {
+            if (guideTabsFocused) {
+                when (code) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> applyGuideCategory(guideCategoryIndex - 1)
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> applyGuideCategory(guideCategoryIndex + 1)
+                    KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                        setGuideTabsFocused(false)
+                        epgGrid.requestFocus()
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP -> Unit
+                    KeyEvent.KEYCODE_GUIDE -> leaveGuide()
+                    else -> return super.dispatchKeyEvent(event)
+                }
+                return true
+            }
             when (code) {
+                KeyEvent.KEYCODE_PROG_RED, KeyEvent.KEYCODE_PROG_YELLOW -> applyGuideCategory(guideCategoryIndex - 1)
+                KeyEvent.KEYCODE_PROG_GREEN, KeyEvent.KEYCODE_PROG_BLUE -> applyGuideCategory(guideCategoryIndex + 1)
                 KeyEvent.KEYCODE_GUIDE -> leaveGuide()
                 KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> epgGrid.page(-1)
                 KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> epgGrid.page(1)
@@ -1034,6 +1397,18 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
         if (code == KeyEvent.KEYCODE_GUIDE) {
             pressGuide()
             return true
+        }
+        when (code) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { togglePause(); return true }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (player?.playWhenReady == true) togglePause(); return true }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> { if (player?.playWhenReady == false) togglePause(); return true }
+            KeyEvent.KEYCODE_MEDIA_REWIND -> { seekBy(-SEEK_STEP_MS); return true }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { seekBy(SEEK_STEP_MS); return true }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD -> { seekBy(-SEEK_BIG_STEP_MS); return true }
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD -> { seekBy(SEEK_BIG_STEP_MS); return true }
+            KeyEvent.KEYCODE_MEDIA_STOP -> { goLive(); return true }
+            KeyEvent.KEYCODE_CAPTIONS -> { chooseTrack(C.TRACK_TYPE_TEXT); return true }
+            KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK -> { chooseTrack(C.TRACK_TYPE_AUDIO); return true }
         }
 
         val overlayVisible = overlay.visibility == View.VISIBLE
@@ -1114,7 +1489,7 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
             KeyEvent.KEYCODE_DPAD_LEFT -> showOverlay()
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_INFO -> currentChannel?.let { showBanner(it, null) }
-            KeyEvent.KEYCODE_MENU -> currentChannel?.let { toggleFavourite(it) }
+            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_PROG_YELLOW -> showOptions()
             else -> return super.dispatchKeyEvent(event)
         }
         return true
@@ -1206,5 +1581,11 @@ class MainActivity : Activity(), ChannelAdapter.Listener, GroupAdapter.Listener 
     companion object {
         /** Rows jumped by CH+/CH- while the channel list is open. */
         private const val PAGE_SIZE = 8
+
+        private const val STALL_TIMEOUT_MS = 10_000L
+        private const val SEEK_STEP_MS = 15_000L
+        private const val SEEK_BIG_STEP_MS = 60_000L
+        /** Within this of the live edge counts as "live". */
+        private const val LIVE_SNAP_MS = 8_000L
     }
 }

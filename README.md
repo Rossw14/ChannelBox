@@ -21,6 +21,9 @@ that in Settings. You can also add your own M3U playlist link.
 - **TV guide.** Each channel row shows what's on now, and the banner shows Now and Next.
   The **Guide** button on the remote (or on screen) opens a full-screen, Sky-style grid guide for the
   list you're in, with programme details at the top and the live picture carrying on in the top-right corner.
+- **Smart stream switching.** If a channel's picture stalls for 10 seconds, the next backup stream is tried automatically.
+- **Pause and rewind live TV**, as far back as each channel's server allows (from about a minute to several hours).
+- **Sound and subtitle choices** for channels that offer more than one.
 - **Picture quality limit** in Settings (Automatic, 1080p, 720p or 480p) for slower broadband, plus a bigger
   playback buffer so streams stutter less.
 - Your playlist link's channels are listed first, with the free lists merged in after.
@@ -35,7 +38,11 @@ that in Settings. You can also add your own M3U playlist link.
 | ▶ or Info | Show what's on |
 | Guide | Open the TV guide (press again, or Back, to close) |
 | Number keys | Jump to a channel number |
-| Menu | Add or remove the current channel from Favourites |
+| Menu (or yellow) | Options: favourite, sound track, subtitles |
+| ⏯ Play/Pause | Pause live TV, then carry on from where you paused |
+| ⏪ / ⏩ | Back / forward 15 seconds (⏮ / ⏭: 1 minute) |
+| ⏹ Stop | Jump back to live |
+| Subtitles / Audio buttons | Choose subtitles or sound track directly |
 | Back, Back | Exit |
 
 | In the channel list | |
@@ -51,6 +58,7 @@ that in Settings. You can also add your own M3U playlist link.
 |---|---|
 | ▲ / ▼ | Move between channels |
 | ◀ / ▶ | Earlier / later programmes |
+| ▲ from the top row, or 🔴 / 🟢 | Switch category (All, With listings, News, Movies…) |
 | CH+ / CH− | Page up / down |
 | Number keys | Jump to that channel |
 | OK | Watch that channel |
